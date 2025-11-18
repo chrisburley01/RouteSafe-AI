@@ -1,7 +1,10 @@
-// web/app.js
+// =======================
+// RouteSafe AI – app.js
+// =======================
 
-// Point this at your backend
-const API_BASE_URL = "http://127.0.0.1:8000"; // change when deployed
+// CHANGE THIS when your backend is hosted somewhere public
+// e.g. "https://routesafe-backend.onrender.com"
+const API_BASE_URL = "http://127.0.0.1:8000";
 
 const form = document.getElementById("route-form");
 const statusEl = document.getElementById("status");
@@ -12,12 +15,13 @@ const planPhotoInput = document.getElementById("plan-photo");
 const stopsTextarea = document.getElementById("stops");
 
 function setStatus(message, type = "info") {
-  statusEl.textContent = message;
+  statusEl.textContent = message || "";
   statusEl.classList.remove("rs-error", "rs-success");
   if (type === "error") statusEl.classList.add("rs-error");
   if (type === "success") statusEl.classList.add("rs-success");
 }
 
+// Turn textarea content into an ordered postcode array
 function parsePostcodes(rawText) {
   return rawText
     .split("\n")
@@ -25,22 +29,33 @@ function parsePostcodes(rawText) {
     .filter((line) => line.length > 0);
 }
 
+// ------------------------------
+// Handle form submit (/route)
+// ------------------------------
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
 
   const depot = document.getElementById("depot").value.trim();
-  const vehicleHeightVal = document.getElementById("vehicle-height").value;
-  const vehicleHeight = parseFloat(vehicleHeightVal);
+  const vhRaw = document.getElementById("vehicle-height").value.trim();
+  const vehicleHeight = parseFloat(vhRaw);
   const stopsRaw = stopsTextarea.value;
 
-  if (!depot || !vehicleHeightVal || !stopsRaw) {
-    setStatus("Please fill depot, vehicle height and at least one stop.", "error");
+  if (!depot || !vhRaw) {
+    setStatus("Please fill depot postcode and vehicle height.", "error");
+    return;
+  }
+
+  if (Number.isNaN(vehicleHeight)) {
+    setStatus("Vehicle height must be a number (e.g. 4.95).", "error");
     return;
   }
 
   const deliveryPostcodes = parsePostcodes(stopsRaw);
   if (deliveryPostcodes.length === 0) {
-    setStatus("Please enter at least one valid delivery postcode.", "error");
+    setStatus(
+      "Enter at least one delivery postcode or use the photo option to auto-fill.",
+      "error"
+    );
     return;
   }
 
@@ -71,17 +86,32 @@ form.addEventListener("submit", async (e) => {
 
     const data = await res.json();
     renderRouteResults(data, vehicleHeight);
-    setStatus("Route calculated (distance/time is approximate in this prototype).", "success");
+    setStatus(
+      "Route calculated. Distances/times are approximate until full HGV routing is plugged in.",
+      "success"
+    );
   } catch (err) {
     console.error(err);
     setStatus(
-      "Could not reach RouteSafe AI backend or it returned an error. Check API URL and logs.",
+      "Could not reach RouteSafe AI backend or it returned an error. Check API URL and backend.",
       "error"
     );
   }
 });
 
+// ------------------------------
+// Render /route response
+// ------------------------------
 function renderRouteResults(data, vehicleHeight) {
+  // Expecting:
+  // {
+  //   total_distance_km,
+  //   total_duration_min,
+  //   legs: [
+  //     { from_, to, distance_km, duration_min, near_height_limit }
+  //   ]
+  // }
+
   const { total_distance_km, total_duration_min, legs } = data;
 
   summaryEl.textContent = `Total: ${total_distance_km.toFixed(
@@ -111,19 +141,29 @@ function renderRouteResults(data, vehicleHeight) {
     meta.className = "rs-leg-meta";
     meta.textContent = `${leg.distance_km.toFixed(
       1
-    )} km · ${Math.round(leg.duration_min)} mins`;
+    )} km · approx ${Math.round(leg.duration_min)} mins`;
 
     main.appendChild(fromTo);
     main.appendChild(meta);
     li.appendChild(main);
 
+    // Height warning if backend flags it
     if (leg.near_height_limit) {
       const warn = document.createElement("div");
       warn.className = "rs-leg-meta";
       warn.textContent =
-        "⚠ Near a height restriction – double-check in-cab navigation.";
+        "⚠ Near a height restriction – confirm on in-cab navigation.";
       li.appendChild(warn);
     }
+
+    // "Open in Google Maps" link
+    const mapsLink = document.createElement("a");
+    mapsLink.className = "rs-leg-meta";
+    mapsLink.href = buildGoogleMapsUrl(leg.from_, leg.to);
+    mapsLink.target = "_blank";
+    mapsLink.rel = "noopener noreferrer";
+    mapsLink.textContent = "Open this leg in Google Maps";
+    li.appendChild(mapsLink);
 
     legsListEl.appendChild(li);
   });
@@ -131,8 +171,16 @@ function renderRouteResults(data, vehicleHeight) {
   resultsCard.classList.remove("rs-hidden");
 }
 
-// ---- OCR flow for photo of plan ---- //
+// Build Google Maps directions URL for a leg
+function buildGoogleMapsUrl(fromPostcode, toPostcode) {
+  const origin = encodeURIComponent(fromPostcode);
+  const dest = encodeURIComponent(toPostcode);
+  return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}&travelmode=driving`;
+}
 
+// ------------------------------
+// OCR: photo of printed plan → /ocr
+// ------------------------------
 planPhotoInput.addEventListener("change", async () => {
   const file = planPhotoInput.files && planPhotoInput.files[0];
   if (!file) return;
@@ -157,20 +205,23 @@ planPhotoInput.addEventListener("change", async () => {
     const pcs = data.postcodes || [];
 
     if (!pcs.length) {
-      setStatus("No postcodes found in image. Check clarity and try again.", "error");
+      setStatus(
+        "No postcodes found in the image. Check lighting/clarity and try again.",
+        "error"
+      );
       return;
     }
 
-    // Put the extracted postcodes into the textarea, one per line
+    // Fill textarea with extracted postcodes
     stopsTextarea.value = pcs.join("\n");
     setStatus(
-      `Found ${pcs.length} postcodes. Check/amend them below, then hit "Generate safe legs".`,
+      `Found ${pcs.length} postcodes from the photo. Check them below, then hit "Generate safe legs".`,
       "success"
     );
   } catch (err) {
     console.error(err);
     setStatus(
-      "Could not OCR the image. Make sure backend is running and the photo is clear.",
+      "Could not OCR the image. Check backend is running and API_BASE_URL is correct.",
       "error"
     );
   }
