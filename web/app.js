@@ -1,7 +1,7 @@
 // web/app.js
 
-// Set this to where your backend runs (local dev or deployed)
-const API_BASE_URL = "http://127.0.0.1:8000"; // change when backend is live
+// Point this at your backend
+const API_BASE_URL = "http://127.0.0.1:8000"; // change when deployed
 
 const form = document.getElementById("route-form");
 const statusEl = document.getElementById("status");
@@ -9,6 +9,7 @@ const resultsCard = document.getElementById("results-card");
 const legsListEl = document.getElementById("legs-list");
 const summaryEl = document.getElementById("summary");
 const planPhotoInput = document.getElementById("plan-photo");
+const stopsTextarea = document.getElementById("stops");
 
 function setStatus(message, type = "info") {
   statusEl.textContent = message;
@@ -28,23 +29,22 @@ form.addEventListener("submit", async (e) => {
   e.preventDefault();
 
   const depot = document.getElementById("depot").value.trim();
-  const vehicleHeight = parseFloat(
-    document.getElementById("vehicle-height").value
-  );
-  const stopsRaw = document.getElementById("stops").value;
+  const vehicleHeightVal = document.getElementById("vehicle-height").value;
+  const vehicleHeight = parseFloat(vehicleHeightVal);
+  const stopsRaw = stopsTextarea.value;
 
-  if (!depot || !vehicleHeight || !stopsRaw) {
+  if (!depot || !vehicleHeightVal || !stopsRaw) {
     setStatus("Please fill depot, vehicle height and at least one stop.", "error");
     return;
   }
 
   const deliveryPostcodes = parsePostcodes(stopsRaw);
   if (deliveryPostcodes.length === 0) {
-    setStatus("Please enter at least one delivery postcode.", "error");
+    setStatus("Please enter at least one valid delivery postcode.", "error");
     return;
   }
 
-  setStatus("Calculating HGV-safe route…");
+  setStatus("Calculating HGV-safe legs (prototype)…");
   resultsCard.classList.add("rs-hidden");
   legsListEl.innerHTML = "";
   summaryEl.textContent = "";
@@ -56,7 +56,6 @@ form.addEventListener("submit", async (e) => {
       vehicle_height_m: vehicleHeight,
     };
 
-    // Call backend /route endpoint
     const res = await fetch(`${API_BASE_URL}/route`, {
       method: "POST",
       headers: {
@@ -66,39 +65,23 @@ form.addEventListener("submit", async (e) => {
     });
 
     if (!res.ok) {
-      throw new Error(`Backend error: ${res.status}`);
+      const text = await res.text();
+      throw new Error(`Backend error ${res.status}: ${text}`);
     }
 
     const data = await res.json();
     renderRouteResults(data, vehicleHeight);
-    setStatus("Done.", "success");
+    setStatus("Route calculated (distance/time is approximate in this prototype).", "success");
   } catch (err) {
     console.error(err);
     setStatus(
-      "Could not reach RouteSafe AI backend. Check API URL or try again.",
+      "Could not reach RouteSafe AI backend or it returned an error. Check API URL and logs.",
       "error"
     );
   }
 });
 
-// Render backend /route response
 function renderRouteResults(data, vehicleHeight) {
-  // Expected shape (you can tweak backend to match this):
-  // {
-  //   total_distance_km: number,
-  //   total_duration_min: number,
-  //   legs: [
-  //     {
-  //       from: "LS27 0LF",
-  //       to: "WF3 1AB",
-  //       distance_km: number,
-  //       duration_min: number,
-  //       near_height_limit: boolean
-  //     },
-  //     ...
-  //   ]
-  // }
-
   const { total_distance_km, total_duration_min, legs } = data;
 
   summaryEl.textContent = `Total: ${total_distance_km.toFixed(
@@ -108,6 +91,7 @@ function renderRouteResults(data, vehicleHeight) {
   )} mins · vehicle height ${vehicleHeight.toFixed(2)} m`;
 
   legsListEl.innerHTML = "";
+
   legs.forEach((leg, index) => {
     const li = document.createElement("li");
     li.className = "rs-leg-item";
@@ -117,9 +101,11 @@ function renderRouteResults(data, vehicleHeight) {
 
     const fromTo = document.createElement("div");
     fromTo.className = "rs-leg-fromto";
-    fromTo.textContent = `${index === 0 ? "Depot" : `Stop ${index}`} → Stop ${
-      index + 1
-    }: ${leg.to}`;
+
+    const labelFrom = index === 0 ? "Depot" : `Stop ${index}`;
+    const labelTo = `Stop ${index + 1}`;
+
+    fromTo.textContent = `${labelFrom} (${leg.from_}) → ${labelTo} (${leg.to})`;
 
     const meta = document.createElement("div");
     meta.className = "rs-leg-meta";
@@ -135,7 +121,7 @@ function renderRouteResults(data, vehicleHeight) {
       const warn = document.createElement("div");
       warn.className = "rs-leg-meta";
       warn.textContent =
-        "⚠ Passes near a height restriction – take extra care / confirm in cab.";
+        "⚠ Near a height restriction – double-check in-cab navigation.";
       li.appendChild(warn);
     }
 
@@ -145,12 +131,47 @@ function renderRouteResults(data, vehicleHeight) {
   resultsCard.classList.remove("rs-hidden");
 }
 
-// (Future) hook up OCR endpoint when ready
-planPhotoInput.addEventListener("change", () => {
-  if (planPhotoInput.files && planPhotoInput.files[0]) {
+// ---- OCR flow for photo of plan ---- //
+
+planPhotoInput.addEventListener("change", async () => {
+  const file = planPhotoInput.files && planPhotoInput.files[0];
+  if (!file) return;
+
+  setStatus("Uploading photo and extracting postcodes…");
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/ocr`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`OCR error ${res.status}: ${text}`);
+    }
+
+    const data = await res.json();
+    const pcs = data.postcodes || [];
+
+    if (!pcs.length) {
+      setStatus("No postcodes found in image. Check clarity and try again.", "error");
+      return;
+    }
+
+    // Put the extracted postcodes into the textarea, one per line
+    stopsTextarea.value = pcs.join("\n");
     setStatus(
-      "Photo selected. OCR-based postcode extraction will be wired in a later version.",
-      "info"
+      `Found ${pcs.length} postcodes. Check/amend them below, then hit "Generate safe legs".`,
+      "success"
+    );
+  } catch (err) {
+    console.error(err);
+    setStatus(
+      "Could not OCR the image. Make sure backend is running and the photo is clear.",
+      "error"
     );
   }
 });
