@@ -1,7 +1,5 @@
 fastapi
 uvicorn[standard]
 pydantic
-python-multipart
-pillow
-pytesseract
+pandas
 requests
