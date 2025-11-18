@@ -1,4 +1,3 @@
-.
 # bridge_engine.py
 
 import math
@@ -38,14 +37,12 @@ class BridgeEngine:
     def __init__(
         self,
         csv_path: str,
-        min_height_m: float = 0.0,
         search_radius_m: float = 300.0,
         conflict_clearance_m: float = 0.0,
         near_clearance_m: float = 0.25,
     ):
         """
         :param csv_path: path to bridge_heights_clean.csv
-        :param min_height_m: ignore bridges taller than this (0 = keep all)
         :param search_radius_m: only consider bridges within this distance of leg
         :param conflict_clearance_m: if vehicle_height_m + this > bridge.height_m => conflict
         :param near_clearance_m: if vehicle_height_m + this > bridge.height_m => near_height_limit
@@ -57,7 +54,7 @@ class BridgeEngine:
 
         df = pd.read_csv(csv_path)
 
-        # Normalise column names
+        # Normalise column names from the cleaned CSV
         df = df.rename(
             columns={
                 "BRIDGE DATA": "bridge_id",
@@ -66,16 +63,12 @@ class BridgeEngine:
             }
         )
 
-        # Clean up
         df["height_m"] = pd.to_numeric(df["height_m"], errors="coerce")
         df["lat"] = pd.to_numeric(df["lat"], errors="coerce")
         df["lon"] = pd.to_numeric(df["lon"], errors="coerce")
 
         # Only keep rows with coordinates
         df = df.dropna(subset=["lat", "lon"])
-
-        if min_height_m > 0:
-            df = df[df["height_m"].fillna(999) >= min_height_m]
 
         for _, row in df.iterrows():
             self.bridges.append(
@@ -108,8 +101,8 @@ class BridgeEngine:
         lon_r = BridgeEngine._deg_to_rad(lon)
         ref_lat_r = BridgeEngine._deg_to_rad(ref_lat)
 
-        x = EARTH_RADIUS_M * (lon_r) * math.cos(ref_lat_r)
-        y = EARTH_RADIUS_M * (lat_r)
+        x = EARTH_RADIUS_M * lon_r * math.cos(ref_lat_r)
+        y = EARTH_RADIUS_M * lat_r
         return x, y
 
     @staticmethod
@@ -143,13 +136,6 @@ class BridgeEngine:
     ) -> BridgeCheckResult:
         """
         Check a leg for low-bridge issues.
-
-        Returns:
-          - has_conflict: True if any bridge is lower than vehicle height
-                         (within conflict_clearance_m)
-          - near_height_limit: True if any bridge is within near_clearance_m
-          - nearest_bridge: the closest relevant bridge
-          - nearest_distance_m: its distance to the leg
         """
         if not self.bridges:
             return BridgeCheckResult(False, False, None, None)
@@ -166,16 +152,12 @@ class BridgeEngine:
         near_height_limit = False
 
         for bridge in self.bridges:
-            # Quick reject by approximate bounding box
-            # (optional optimisation: skip distant bridges early)
-
             bx, by = self._latlon_to_xy_m(bridge.lat, bridge.lon, ref_lat)
             dist_m = self._point_to_segment_distance_m(bx, by, x1, y1, x2, y2)
 
             if dist_m > self.search_radius_m:
                 continue
 
-            # Height logic
             if bridge.height_m is not None:
                 if vehicle_height_m + self.conflict_clearance_m > bridge.height_m:
                     has_conflict = True
