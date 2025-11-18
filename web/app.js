@@ -2,9 +2,8 @@
 // RouteSafe AI – app.js
 // =======================
 
-// CHANGE THIS when your backend is hosted somewhere public
-// e.g. "https://routesafe-backend.onrender.com"
-const API_BASE_URL = "http://127.0.0.1:8000";
+// LIVE backend URL (Render)
+const API_BASE_URL = "https://routesafe-ai.onrender.com";
 
 const form = document.getElementById("route-form");
 const statusEl = document.getElementById("status");
@@ -14,6 +13,8 @@ const summaryEl = document.getElementById("summary");
 const planPhotoInput = document.getElementById("plan-photo");
 const stopsTextarea = document.getElementById("stops");
 
+// ---------- helpers ---------- //
+
 function setStatus(message, type = "info") {
   statusEl.textContent = message || "";
   statusEl.classList.remove("rs-error", "rs-success");
@@ -21,7 +22,6 @@ function setStatus(message, type = "info") {
   if (type === "success") statusEl.classList.add("rs-success");
 }
 
-// Turn textarea content into an ordered postcode array
 function parsePostcodes(rawText) {
   return rawText
     .split("\n")
@@ -29,9 +29,14 @@ function parsePostcodes(rawText) {
     .filter((line) => line.length > 0);
 }
 
-// ------------------------------
-// Handle form submit (/route)
-// ------------------------------
+function buildGoogleMapsUrl(fromPostcode, toPostcode) {
+  const origin = encodeURIComponent(fromPostcode);
+  const dest = encodeURIComponent(toPostcode);
+  return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}&travelmode=driving`;
+}
+
+// ---------- form submit -> /route ---------- //
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
 
@@ -42,11 +47,13 @@ form.addEventListener("submit", async (e) => {
 
   if (!depot || !vhRaw) {
     setStatus("Please fill depot postcode and vehicle height.", "error");
+    resultsCard.classList.add("rs-hidden");
     return;
   }
 
   if (Number.isNaN(vehicleHeight)) {
     setStatus("Vehicle height must be a number (e.g. 4.95).", "error");
+    resultsCard.classList.add("rs-hidden");
     return;
   }
 
@@ -56,10 +63,11 @@ form.addEventListener("submit", async (e) => {
       "Enter at least one delivery postcode or use the photo option to auto-fill.",
       "error"
     );
+    resultsCard.classList.add("rs-hidden");
     return;
   }
 
-  setStatus("Calculating HGV-safe legs (prototype)…");
+  setStatus("Calculating safe legs…");
   resultsCard.classList.add("rs-hidden");
   legsListEl.innerHTML = "";
   summaryEl.textContent = "";
@@ -73,9 +81,7 @@ form.addEventListener("submit", async (e) => {
 
     const res = await fetch(`${API_BASE_URL}/route`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
 
@@ -87,31 +93,21 @@ form.addEventListener("submit", async (e) => {
     const data = await res.json();
     renderRouteResults(data, vehicleHeight);
     setStatus(
-      "Route calculated. Distances/times are approximate until full HGV routing is plugged in.",
+      "Route calculated. Distances/times rough until HGV router is plugged in, but bridge checks are live.",
       "success"
     );
   } catch (err) {
     console.error(err);
     setStatus(
-      "Could not reach RouteSafe AI backend or it returned an error. Check API URL and backend.",
+      "Could not reach RouteSafe AI backend or it returned an error. Check Render service & logs.",
       "error"
     );
   }
 });
 
-// ------------------------------
-// Render /route response
-// ------------------------------
-function renderRouteResults(data, vehicleHeight) {
-  // Expecting:
-  // {
-  //   total_distance_km,
-  //   total_duration_min,
-  //   legs: [
-  //     { from_, to, distance_km, duration_min, near_height_limit }
-  //   ]
-  // }
+// ---------- render /route response ---------- //
 
+function renderRouteResults(data, vehicleHeight) {
   const { total_distance_km, total_duration_min, legs } = data;
 
   summaryEl.textContent = `Total: ${total_distance_km.toFixed(
@@ -126,15 +122,14 @@ function renderRouteResults(data, vehicleHeight) {
     const li = document.createElement("li");
     li.className = "rs-leg-item";
 
-    const main = document.createElement("div");
-    main.className = "rs-leg-main";
-
-    const fromTo = document.createElement("div");
-    fromTo.className = "rs-leg-fromto";
+    const topLine = document.createElement("div");
+    topLine.className = "rs-leg-main";
 
     const labelFrom = index === 0 ? "Depot" : `Stop ${index}`;
     const labelTo = `Stop ${index + 1}`;
 
+    const fromTo = document.createElement("div");
+    fromTo.className = "rs-leg-fromto";
     fromTo.textContent = `${labelFrom} (${leg.from_}) → ${labelTo} (${leg.to})`;
 
     const meta = document.createElement("div");
@@ -143,22 +138,22 @@ function renderRouteResults(data, vehicleHeight) {
       1
     )} km · approx ${Math.round(leg.duration_min)} mins`;
 
-    main.appendChild(fromTo);
-    main.appendChild(meta);
-    li.appendChild(main);
+    topLine.appendChild(fromTo);
+    topLine.appendChild(meta);
+    li.appendChild(topLine);
 
-    // Height warning if backend flags it
+    // Height warning from backend
     if (leg.near_height_limit) {
       const warn = document.createElement("div");
-      warn.className = "rs-leg-meta";
+      warn.className = "rs-leg-meta rs-leg-warning";
       warn.textContent =
-        "⚠ Near a height restriction – confirm on in-cab navigation.";
+        "⚠ Near a height restriction – double-check on in-cab navigation.";
       li.appendChild(warn);
     }
 
-    // "Open in Google Maps" link
+    // Open leg in Google Maps
     const mapsLink = document.createElement("a");
-    mapsLink.className = "rs-leg-meta";
+    mapsLink.className = "rs-leg-meta rs-leg-link";
     mapsLink.href = buildGoogleMapsUrl(leg.from_, leg.to);
     mapsLink.target = "_blank";
     mapsLink.rel = "noopener noreferrer";
@@ -171,21 +166,14 @@ function renderRouteResults(data, vehicleHeight) {
   resultsCard.classList.remove("rs-hidden");
 }
 
-// Build Google Maps directions URL for a leg
-function buildGoogleMapsUrl(fromPostcode, toPostcode) {
-  const origin = encodeURIComponent(fromPostcode);
-  const dest = encodeURIComponent(toPostcode);
-  return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}&travelmode=driving`;
-}
+// ---------- /ocr: photo of printed plan ---------- //
 
-// ------------------------------
-// OCR: photo of printed plan → /ocr
-// ------------------------------
 planPhotoInput.addEventListener("change", async () => {
   const file = planPhotoInput.files && planPhotoInput.files[0];
   if (!file) return;
 
   setStatus("Uploading photo and extracting postcodes…");
+  resultsCard.classList.add("rs-hidden");
 
   const formData = new FormData();
   formData.append("file", file);
@@ -212,16 +200,15 @@ planPhotoInput.addEventListener("change", async () => {
       return;
     }
 
-    // Fill textarea with extracted postcodes
     stopsTextarea.value = pcs.join("\n");
     setStatus(
-      `Found ${pcs.length} postcodes from the photo. Check them below, then hit "Generate safe legs".`,
+      `Found ${pcs.length} postcodes from the photo. Check them, then hit "Generate safe legs".`,
       "success"
     );
   } catch (err) {
     console.error(err);
     setStatus(
-      "Could not OCR the image. Check backend is running and API_BASE_URL is correct.",
+      "Could not OCR the image. Check backend /ocr implementation and logs.",
       "error"
     );
   }
