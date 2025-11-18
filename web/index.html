@@ -1,1 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>RouteSafe AI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="rs-header">
+    <div class="rs-header-inner">
+      <div class="rs-logo">
+        <span class="rs-logo-icon">🛣️</span>
+        <span class="rs-logo-text">RouteSafe <strong>AI</strong></span>
+      </div>
+      <div class="rs-header-tagline">
+        HGV routes that avoid low bridges.
+      </div>
+    </div>
+  </header>
 
+  <main class="rs-main">
+    <section class="rs-card">
+      <h1>Build a safe HGV route</h1>
+      <p class="rs-subtitle">
+        Keep your existing drop order – RouteSafe AI will find <strong>HGV-safe</strong> legs between each stop.
+      </p>
+
+      <form id="route-form" class="rs-form">
+        <div class="rs-grid">
+          <div class="rs-field">
+            <label for="depot">Depot postcode</label>
+            <input id="depot" name="depot" type="text" placeholder="e.g. LS27 0LF" required />
+          </div>
+
+          <div class="rs-field">
+            <label for="vehicle-height">Vehicle / trailer height (m)</label>
+            <input
+              id="vehicle-height"
+              name="vehicle-height"
+              type="number"
+              step="0.01"
+              min="3.0"
+              max="5.5"
+              placeholder="e.g. 4.95"
+              required
+            />
+            <small class="rs-help">Use your full running height.</small>
+          </div>
+        </div>
+
+        <div class="rs-field">
+          <label for="stops">
+            Delivery postcodes in order
+          </label>
+          <textarea
+            id="stops"
+            name="stops"
+            rows="6"
+            placeholder="One postcode per line, in drop order&#10;e.g.&#10;WF3 1AB&#10;HG1 5AA&#10;M28 7XY"
+            required
+          ></textarea>
+        </div>
+
+        <div class="rs-divider">
+          <span>or</span>
+        </div>
+
+        <div class="rs-field">
+          <label for="plan-photo">
+            Photo of your printed plan <span class="rs-badge rs-badge-beta">beta</span>
+          </label>
+          <input id="plan-photo" name="plan-photo" type="file" accept="image/*" />
+          <small class="rs-help">
+            Take a clear photo of your route sheet – postcodes will be auto-read and filled in.
+          </small>
+        </div>
+
+        <button type="submit" class="rs-button-primary">
+          Generate safe legs
+        </button>
+
+        <div id="status" class="rs-status" aria-live="polite"></div>
+      </form>
+    </section>
+
+    <section id="results-card" class="rs-card rs-card-secondary rs-hidden">
+      <h2>Route legs</h2>
+      <p class="rs-subtitle">
+        Each leg is calculated in your order. Distance/time are approximate until we plug in the HGV router.
+      </p>
+
+      <div id="summary" class="rs-summary"></div>
+      <ol id="legs-list" class="rs-legs-list"></ol>
+    </section>
+  </main>
+
+  <footer class="rs-footer">
+    RouteSafe AI · prototype v0.1
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
