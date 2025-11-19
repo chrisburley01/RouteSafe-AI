@@ -10,12 +10,12 @@ from pydantic import BaseModel
 
 from bridge_engine import BridgeEngine
 
-USER_AGENT = "RouteSafeAI/0.2 (contact: example@example.com)"
+
+USER_AGENT = "RouteSafeAI/0.1 (contact: example@example.com)"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org"
 
 app = FastAPI(title="RouteSafe AI", version="0.2")
 
-# Allow your GitHub Pages front end
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -27,12 +27,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global bridge engine instance (loads CSV on startup)
+# Global bridge engine instance
 bridge_engine = BridgeEngine(
     csv_path="bridge_heights_clean.csv",
     search_radius_m=300.0,
-    conflict_clearance_m=0.0,
-    near_clearance_m=0.25,
+    conflict_clearance_m=0.0,   # if vehicle_height > bridge_height = hard conflict
+    near_clearance_m=0.25,      # within 25cm = near height limit
 )
 
 
@@ -58,7 +58,7 @@ class RouteResponse(BaseModel):
     legs: List[Leg]
 
 
-# ---------- GEO UTILS ---------- #
+# ---------- UTILS ---------- #
 
 def geocode_postcode(postcode: str) -> Tuple[float, float]:
     params = {
@@ -127,10 +127,6 @@ def root():
 
 @app.post("/route", response_model=RouteResponse)
 def route_endpoint(request: RouteRequest):
-    """
-    Main route endpoint: takes depot + delivery postcodes + vehicle height,
-    returns legs with rough distance/time + bridge risk flags.
-    """
     depot = request.depot_postcode.strip().upper()
     deliveries = [pc.strip().upper() for pc in request.delivery_postcodes if pc.strip()]
 
@@ -150,7 +146,7 @@ def route_endpoint(request: RouteRequest):
 
         distance_km, duration_min, lat1, lon1, lat2, lon2 = estimate_leg(from_pc, to_pc)
 
-        # Bridge check on this leg
+        # Bridge check for this leg
         bridge_result = bridge_engine.check_leg(
             start_lat=lat1,
             start_lon=lon1,
@@ -159,6 +155,13 @@ def route_endpoint(request: RouteRequest):
             vehicle_height_m=request.vehicle_height_m,
         )
 
+        # If there is a hard conflict – bridge lower than vehicle – block this leg
+        if bridge_result.has_conflict:
+            raise HTTPException(
+                status_code=409,
+                detail="Unsafe leg: route passes near a bridge lower than vehicle height.",
+            )
+
         leg = Leg(
             from_=from_pc,
             to=to_pc,
@@ -166,7 +169,6 @@ def route_endpoint(request: RouteRequest):
             duration_min=duration_min,
             near_height_limit=bridge_result.near_height_limit,
         )
-
         legs.append(leg)
         total_distance += distance_km
         total_duration += duration_min
@@ -178,7 +180,7 @@ def route_endpoint(request: RouteRequest):
     )
 
 
-# Simple stub so the /ocr call doesn't crash yet
+# Stub so the /ocr call doesn't crash yet
 @app.post("/ocr")
 async def ocr_stub(file: UploadFile = File(...)):
     return {"raw_text": "", "postcodes": []}
