@@ -30,13 +30,13 @@ class BridgeCheckResult:
 
 class BridgeEngine:
     """
-    Loads low-bridge data and can check a single leg
-    against nearby bridges, considering vehicle height.
+    Loads low-bridge data and checks a leg (start_lat/lon -> end_lat/lon)
+    for low-bridge issues, given vehicle height.
     """
 
     def __init__(
         self,
-        csv_path: str,
+        csv_path: str = "bridge_heights_clean.csv",
         search_radius_m: float = 300.0,
         conflict_clearance_m: float = 0.0,
         near_clearance_m: float = 0.25,
@@ -136,13 +136,13 @@ class BridgeEngine:
     ) -> BridgeCheckResult:
         """
         Check a leg for low-bridge issues.
+        Returns flags + nearest relevant bridge.
         """
         if not self.bridges:
             return BridgeCheckResult(False, False, None, None)
 
         ref_lat = (start_lat + end_lat) / 2.0
 
-        # Convert leg endpoints to x,y
         x1, y1 = self._latlon_to_xy_m(start_lat, start_lon, ref_lat)
         x2, y2 = self._latlon_to_xy_m(end_lat, end_lon, ref_lat)
 
@@ -159,9 +159,11 @@ class BridgeEngine:
                 continue
 
             if bridge.height_m is not None:
+                # Hard conflict = vehicle as tall or taller than bridge (minus tiny buffer)
                 if vehicle_height_m + self.conflict_clearance_m > bridge.height_m:
                     has_conflict = True
 
+                # Near limit if within near_clearance_m of bridge height
                 if vehicle_height_m + self.near_clearance_m > bridge.height_m:
                     near_height_limit = True
 
