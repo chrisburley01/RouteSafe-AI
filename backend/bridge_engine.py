@@ -1,178 +1,185 @@
 # bridge_engine.py
+#
+# Core logic for checking a route against low bridges.
 
+from typing import List, Tuple, Dict
 import math
-from dataclasses import dataclass
-from typing import List, Optional, Tuple
-
 import pandas as pd
 
-EARTH_RADIUS_M = 6371000.0  # metres
+
+def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    Great-circle distance between two points on Earth (in metres).
+    """
+    R = 6371000.0  # metres
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+
+    a = (
+        math.sin(dphi / 2.0) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2.0) ** 2
+    )
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return R * c
 
 
-@dataclass
-class Bridge:
-    bridge_id: str
-    name: str
-    os_grid_ref: str
-    height_m: Optional[float]
-    height_ft: str
-    lat: float
-    lon: float
-
-
-@dataclass
-class BridgeCheckResult:
-    has_conflict: bool
-    near_height_limit: bool
-    nearest_bridge: Optional[Bridge]
-    nearest_distance_m: Optional[float]
+def feet_inches_to_meters(feet: float, inches: float) -> float:
+    """
+    Convert a height given in feet + inches to metres.
+    """
+    total_inches = float(feet) * 12.0 + float(inches)
+    return total_inches * 0.0254  # exact inch→metres factor
 
 
 class BridgeEngine:
     """
-    Loads low-bridge data and can check a single leg
-    against nearby bridges, considering vehicle height.
+    Loads bridge data and checks a route for low-bridge conflicts.
+
+    CSV expectations (we handle a few variants):
+
+      Option A (recommended, in feet + inches):
+        latitude, longitude, height_ft, height_in
+
+      Option B (already in metres):
+        latitude, longitude, height_m
+
+      Option C (single height column in metres):
+        latitude, longitude, height
     """
 
     def __init__(
         self,
-        csv_path: str,
+        csv_path: str = "bridge_heights_clean.csv",
         search_radius_m: float = 300.0,
         conflict_clearance_m: float = 0.0,
         near_clearance_m: float = 0.25,
-    ):
-        """
-        :param csv_path: path to bridge_heights_clean.csv
-        :param search_radius_m: only consider bridges within this distance of leg
-        :param conflict_clearance_m: if vehicle_height_m + this > bridge.height_m => conflict
-        :param near_clearance_m: if vehicle_height_m + this > bridge.height_m => near_height_limit
-        """
-        self.bridges: List[Bridge] = []
-        self.search_radius_m = search_radius_m
-        self.conflict_clearance_m = conflict_clearance_m
-        self.near_clearance_m = near_clearance_m
+    ) -> None:
+        self.csv_path = csv_path
+        self.search_radius_m = float(search_radius_m)
+        self.conflict_clearance_m = float(conflict_clearance_m)
+        self.near_clearance_m = float(near_clearance_m)
 
-        df = pd.read_csv(csv_path)
+        self.bridges = pd.read_csv(self.csv_path)
 
-        # Normalise column names from the cleaned CSV
-        df = df.rename(
-            columns={
-                "BRIDGE DATA": "bridge_id",
-                "Unnamed: 4": "bridge_name",
-                "Unnamed: 3": "os_grid_ref",
-            }
-        )
+        # --- Normalise height into metres ------------------------------------
+        if "height_m" in self.bridges.columns:
+            # Already in metres; just cast to float
+            self.bridges["height_m"] = self.bridges["height_m"].astype(float)
 
-        df["height_m"] = pd.to_numeric(df["height_m"], errors="coerce")
-        df["lat"] = pd.to_numeric(df["lat"], errors="coerce")
-        df["lon"] = pd.to_numeric(df["lon"], errors="coerce")
-
-        # Only keep rows with coordinates
-        df = df.dropna(subset=["lat", "lon"])
-
-        for _, row in df.iterrows():
-            self.bridges.append(
-                Bridge(
-                    bridge_id=str(row.get("bridge_id", "")),
-                    name=str(row.get("bridge_name", "")),
-                    os_grid_ref=str(row.get("os_grid_ref", "")),
-                    height_m=row.get("height_m"),
-                    height_ft=str(row.get("height_ft", "")),
-                    lat=float(row["lat"]),
-                    lon=float(row["lon"]),
-                )
+        elif {"height_ft", "height_in"}.issubset(self.bridges.columns):
+            # Convert from feet + inches
+            self.bridges["height_m"] = self.bridges.apply(
+                lambda row: feet_inches_to_meters(row["height_ft"], row["height_in"]),
+                axis=1,
             )
 
-        print(f"[BridgeEngine] Loaded {len(self.bridges)} bridges with coordinates.")
+        elif "height" in self.bridges.columns:
+            # Single column; assume already metres
+            self.bridges["height_m"] = self.bridges["height"].astype(float)
 
-    # ---------- geometry helpers ---------- #
+        else:
+            raise ValueError(
+                "bridge_heights_clean.csv must contain either "
+                "`height_m`, or (`height_ft` and `height_in`), "
+                "or a `height` column in metres."
+            )
 
-    @staticmethod
-    def _deg_to_rad(deg: float) -> float:
-        return deg * math.pi / 180.0
+        # Make sure core columns exist
+        required_cols = {"latitude", "longitude", "height_m"}
+        missing = required_cols - set(self.bridges.columns)
+        if missing:
+            raise ValueError(
+                f"Bridge CSV is missing required columns: {', '.join(sorted(missing))}"
+            )
 
-    @staticmethod
-    def _latlon_to_xy_m(lat: float, lon: float, ref_lat: float) -> Tuple[float, float]:
-        """
-        Convert lat/lon to local x,y in metres using equirectangular approximation,
-        good enough for distances < ~50km.
-        """
-        lat_r = BridgeEngine._deg_to_rad(lat)
-        lon_r = BridgeEngine._deg_to_rad(lon)
-        ref_lat_r = BridgeEngine._deg_to_rad(ref_lat)
+    # --------------------------------------------------------------------- #
+    # Core API
+    # --------------------------------------------------------------------- #
 
-        x = EARTH_RADIUS_M * lon_r * math.cos(ref_lat_r)
-        y = EARTH_RADIUS_M * lat_r
-        return x, y
-
-    @staticmethod
-    def _point_to_segment_distance_m(
-        px: float, py: float, x1: float, y1: float, x2: float, y2: float
-    ) -> float:
-        """
-        Euclidean distance from point P to segment AB in metres.
-        """
-        dx = x2 - x1
-        dy = y2 - y1
-        if dx == 0 and dy == 0:
-            # A and B are the same point
-            return math.hypot(px - x1, py - y1)
-
-        t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)
-        t = max(0.0, min(1.0, t))
-        proj_x = x1 + t * dx
-        proj_y = y1 + t * dy
-        return math.hypot(px - proj_x, py - proj_y)
-
-    # ---------- public API ---------- #
-
-    def check_leg(
+    def analyse_route(
         self,
-        start_lat: float,
-        start_lon: float,
-        end_lat: float,
-        end_lon: float,
+        route_points: List[Tuple[float, float]],
         vehicle_height_m: float,
-    ) -> BridgeCheckResult:
+    ) -> Tuple[List[Dict], List[Dict]]:
         """
-        Check a leg for low-bridge issues.
-        We approximate the leg as a straight line between start/end.
+        Check a route against the bridge dataset.
+
+        route_points: list of (lat, lon) pairs representing the route.
+        vehicle_height_m: running height of the vehicle in metres.
+
+        Returns:
+            conflicts, near_misses
+
+            conflicts   = list of dicts where bridge < vehicle_height_m + conflict_clearance_m
+            near_misses = list of dicts where
+                          vehicle_height_m + conflict_clearance_m
+                          <= bridge < vehicle_height_m + near_clearance_m
         """
-        if not self.bridges:
-            return BridgeCheckResult(False, False, None, None)
+        if not route_points:
+            return [], []
 
-        ref_lat = (start_lat + end_lat) / 2.0
+        vehicle_height_m = float(vehicle_height_m)
 
-        # Convert leg endpoints to x,y
-        x1, y1 = self._latlon_to_xy_m(start_lat, start_lon, ref_lat)
-        x2, y2 = self._latlon_to_xy_m(end_lat, end_lon, ref_lat)
+        conflicts: List[Dict] = []
+        near_misses: List[Dict] = []
 
-        nearest_bridge: Optional[Bridge] = None
-        nearest_dist_m: Optional[float] = None
-        has_conflict = False
-        near_height_limit = False
+        # For each bridge, find the closest route point and evaluate clearance
+        for _, row in self.bridges.iterrows():
+            b_lat = float(row["latitude"])
+            b_lon = float(row["longitude"])
+            b_height_m = float(row["height_m"])
 
-        for bridge in self.bridges:
-            bx, by = self._latlon_to_xy_m(bridge.lat, bridge.lon, ref_lat)
-            dist_m = self._point_to_segment_distance_m(bx, by, x1, y1, x2, y2)
+            # Nearest point on the route (simple but fine for short legs)
+            min_dist = min(
+                haversine_m(b_lat, b_lon, r_lat, r_lon)
+                for (r_lat, r_lon) in route_points
+            )
 
-            if dist_m > self.search_radius_m:
+            if min_dist > self.search_radius_m:
+                # Bridge too far from the driven line; ignore
                 continue
 
-            if bridge.height_m is not None:
-                if vehicle_height_m + self.conflict_clearance_m > bridge.height_m:
-                    has_conflict = True
+            # Clearance: how much higher the bridge is than the vehicle
+            clearance_m = b_height_m - vehicle_height_m
 
-                if vehicle_height_m + self.near_clearance_m > bridge.height_m:
-                    near_height_limit = True
+            # Conflict: bridge is below the vehicle (plus any extra buffer)
+            if b_height_m < vehicle_height_m + self.conflict_clearance_m:
+                conflicts.append(
+                    {
+                        "latitude": b_lat,
+                        "longitude": b_lon,
+                        "height_m": b_height_m,
+                        "distance_m": min_dist,
+                        "clearance_m": clearance_m,
+                    }
+                )
+            # Near miss: just above vehicle but within the "near" buffer
+            elif b_height_m < vehicle_height_m + self.near_clearance_m:
+                near_misses.append(
+                    {
+                        "latitude": b_lat,
+                        "longitude": b_lon,
+                        "height_m": b_height_m,
+                        "distance_m": min_dist,
+                        "clearance_m": clearance_m,
+                    }
+                )
 
-            if nearest_dist_m is None or dist_m < nearest_dist_m:
-                nearest_dist_m = dist_m
-                nearest_bridge = bridge
+        # Sort by how close they are to the route
+        conflicts.sort(key=lambda x: x["distance_m"])
+        near_misses.sort(key=lambda x: x["distance_m"])
 
-        return BridgeCheckResult(
-            has_conflict=has_conflict,
-            near_height_limit=near_height_limit,
-            nearest_bridge=nearest_bridge,
-            nearest_distance_m=nearest_dist_m,
-        )
+        return conflicts, near_misses
+
+    # Backwards-compat alias – in case main.py calls this
+    def check_route(
+        self,
+        route_points: List[Tuple[float, float]],
+        vehicle_height_m: float,
+    ) -> Tuple[List[Dict], List[Dict]]:
+        """
+        Wrapper to keep compatibility with older code.
+        """
+        return self.analyse_route(route_points, vehicle_height_m)
