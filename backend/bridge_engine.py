@@ -30,91 +30,58 @@ class BridgeCheckResult:
 
 class BridgeEngine:
     """
-    Loads low-bridge data and checks a leg (start_lat/lon -> end_lat/lon)
-    for low-bridge issues, given vehicle height.
+    Loads low-bridge data and can check a single leg
+    against nearby bridges, considering vehicle height.
     """
 
     def __init__(
         self,
-        csv_path: str = "bridge_heights_clean.csv",
+        csv_path: str,
         search_radius_m: float = 300.0,
         conflict_clearance_m: float = 0.0,
         near_clearance_m: float = 0.25,
     ):
+        """
+        :param csv_path: path to bridge_heights_clean.csv
+        :param search_radius_m: only consider bridges within this distance of leg
+        :param conflict_clearance_m: if vehicle_height_m + this > bridge.height_m => conflict
+        :param near_clearance_m: if vehicle_height_m + this > bridge.height_m => near_height_limit
+        """
         self.bridges: List[Bridge] = []
         self.search_radius_m = search_radius_m
         self.conflict_clearance_m = conflict_clearance_m
         self.near_clearance_m = near_clearance_m
 
-        try:
-            df = pd.read_csv(csv_path)
-        except Exception as e:
-            # NEVER crash the API if the CSV is missing/bad
-            print(f"[BridgeEngine] Failed to load {csv_path}: {e}")
-            return
+        df = pd.read_csv(csv_path)
 
-        # Try to detect likely column names automatically
-        def find_col(keywords) -> Optional[str]:
-            if isinstance(keywords, str):
-                keywords_local = [keywords]
-            else:
-                keywords_local = keywords
+        # Normalise column names from the cleaned CSV
+        df = df.rename(
+            columns={
+                "BRIDGE DATA": "bridge_id",
+                "Unnamed: 4": "bridge_name",
+                "Unnamed: 3": "os_grid_ref",
+            }
+        )
 
-            for col in df.columns:
-                low = col.lower()
-                if all(k in low for k in keywords_local):
-                    return col
-            return None
+        df["height_m"] = pd.to_numeric(df["height_m"], errors="coerce")
+        df["lat"] = pd.to_numeric(df["lat"], errors="coerce")
+        df["lon"] = pd.to_numeric(df["lon"], errors="coerce")
 
-        lat_col = find_col("lat")
-        lon_col = find_col("lon")
-        # e.g. "height_m", "height (m)", "bridge_height_m", etc.
-        height_col = find_col(["height", "m"])
+        # Only keep rows with coordinates
+        df = df.dropna(subset=["lat", "lon"])
 
-        # Some CSVs use ft/feet – we keep it as a string if present
-        height_ft_col = find_col(["height", "ft"])
-
-        bridge_id_col = find_col("bridge") or find_col("id")
-        name_col = find_col("name")
-        os_ref_col = find_col("grid")
-
-        if not lat_col or not lon_col:
-            print(
-                "[BridgeEngine] No latitude/longitude columns detected in CSV; "
-                "bridge checks will be disabled."
+        for _, row in df.iterrows():
+            self.bridges.append(
+                Bridge(
+                    bridge_id=str(row.get("bridge_id", "")),
+                    name=str(row.get("bridge_name", "")),
+                    os_grid_ref=str(row.get("os_grid_ref", "")),
+                    height_m=row.get("height_m"),
+                    height_ft=str(row.get("height_ft", "")),
+                    lat=float(row["lat"]),
+                    lon=float(row["lon"]),
+                )
             )
-            return
-
-        # Clean numeric columns
-        df[lat_col] = pd.to_numeric(df[lat_col], errors="coerce")
-        df[lon_col] = pd.to_numeric(df[lon_col], errors="coerce")
-
-        if height_col:
-            df[height_col] = pd.to_numeric(df[height_col], errors="coerce")
-
-        df = df.dropna(subset=[lat_col, lon_col])
-
-        for idx, row in df.iterrows():
-            lat_val = row[lat_col]
-            lon_val = row[lon_col]
-
-            if pd.isna(lat_val) or pd.isna(lon_val):
-                continue
-
-            height_m_val: Optional[float] = None
-            if height_col and not pd.isna(row.get(height_col)):
-                height_m_val = float(row[height_col])
-
-            bridge = Bridge(
-                bridge_id=str(row.get(bridge_id_col, idx)),
-                name=str(row.get(name_col, "")),
-                os_grid_ref=str(row.get(os_ref_col, "")),
-                height_m=height_m_val,
-                height_ft=str(row.get(height_ft_col, "")) if height_ft_col else "",
-                lat=float(lat_val),
-                lon=float(lon_val),
-            )
-            self.bridges.append(bridge)
 
         print(f"[BridgeEngine] Loaded {len(self.bridges)} bridges with coordinates.")
 
@@ -169,14 +136,14 @@ class BridgeEngine:
     ) -> BridgeCheckResult:
         """
         Check a leg for low-bridge issues.
-        Returns flags + nearest relevant bridge.
+        We approximate the leg as a straight line between start/end.
         """
         if not self.bridges:
-            # Fail-safe: no data → never block, never crash
             return BridgeCheckResult(False, False, None, None)
 
         ref_lat = (start_lat + end_lat) / 2.0
 
+        # Convert leg endpoints to x,y
         x1, y1 = self._latlon_to_xy_m(start_lat, start_lon, ref_lat)
         x2, y2 = self._latlon_to_xy_m(end_lat, end_lon, ref_lat)
 
@@ -193,11 +160,9 @@ class BridgeEngine:
                 continue
 
             if bridge.height_m is not None:
-                # Hard conflict = vehicle as tall or taller than bridge (minus tiny buffer)
                 if vehicle_height_m + self.conflict_clearance_m > bridge.height_m:
                     has_conflict = True
 
-                # Near limit if within near_clearance_m of bridge height
                 if vehicle_height_m + self.near_clearance_m > bridge.height_m:
                     near_height_limit = True
 
