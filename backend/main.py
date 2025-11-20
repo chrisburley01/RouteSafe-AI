@@ -28,7 +28,7 @@ bridge_engine = BridgeEngine(BRIDGE_CSV_PATH)
 # FastAPI setup
 # -------------------------------------------------------------------
 
-app = FastAPI(title="RouteSafe AI Backend", version="0.2")
+app = FastAPI(title="RouteSafe AI Backend", version="0.3")
 
 app.add_middleware(
     CORSMiddleware,
@@ -63,6 +63,8 @@ class RouteLegOut(BaseModel):
     duration_min: float
     vehicle_height_m: float
     low_bridges: List[BridgeOut]
+    # list of [lon, lat] pairs from ORS – optional
+    geometry: List[List[float]] | None = None
 
 
 class RouteResponse(BaseModel):
@@ -70,7 +72,7 @@ class RouteResponse(BaseModel):
 
 
 # -------------------------------------------------------------------
-# UI HTML (same look as your working prototype)
+# UI HTML (now with Leaflet map support)
 # -------------------------------------------------------------------
 
 HTML_PAGE = """
@@ -80,6 +82,15 @@ HTML_PAGE = """
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>RouteSafe AI · Prototype</title>
+
+  <!-- Leaflet map CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+
   <style>
     :root {
       --primary: #002c77;
@@ -266,7 +277,7 @@ HTML_PAGE = """
       border-radius: 10px;
       border: 1px solid #e5e7eb;
       padding: 0.6rem 0.65rem;
-      margin-bottom: 0.5rem;
+      margin-bottom: 0.75rem;
       background: #f9fafb;
     }
     .leg-header {
@@ -308,6 +319,13 @@ HTML_PAGE = """
     }
     .bridges-summary strong {
       font-weight: 600;
+    }
+    .leg-map {
+      margin-top: 0.45rem;
+      height: 210px;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid #e5e7eb;
     }
     footer {
       margin-top: 1.3rem;
@@ -364,6 +382,13 @@ HTML_PAGE = """
     <footer>Data source: OpenRouteService + internal UK low bridge dataset.</footer>
   </div>
 
+  <!-- Leaflet JS -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-o9N1j7kGIC3bJlP2G8VHx0LhQv0vM1sM/5p3pqtIDJk="
+    crossorigin=""
+  ></script>
+
   <script>
     const BACKEND_URL = "/api/route";
 
@@ -383,6 +408,26 @@ HTML_PAGE = """
         type === "error" ? "status status-error" : "status status-ok";
     }
 
+    function renderLegMap(geometry, mapId) {
+      if (!geometry || !geometry.length || typeof L === "undefined") {
+        return;
+      }
+      // geometry is [[lon, lat], ...] – Leaflet wants [lat, lon]
+      const latLngs = geometry.map(([lon, lat]) => [lat, lon]);
+
+      const map = L.map(mapId, {
+        zoomControl: false,
+        attributionControl: false,
+      });
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+      }).addTo(map);
+
+      const line = L.polyline(latLngs).addTo(map);
+      map.fitBounds(line.getBounds(), { padding: [10, 10] });
+    }
+
     function renderLegs(legs) {
       legsContainer.innerHTML = "";
       if (!legs || !legs.length) {
@@ -395,6 +440,7 @@ HTML_PAGE = """
         const risky = bridges.length > 0;
         const wrapper = document.createElement("div");
         wrapper.className = "leg";
+
         const header = document.createElement("div");
         header.className = "leg-header";
         const title = document.createElement("div");
@@ -405,6 +451,7 @@ HTML_PAGE = """
         pill.textContent = risky ? "LOW BRIDGE(S)" : "HGV SAFE";
         header.appendChild(title);
         header.appendChild(pill);
+
         const meta = document.createElement("div");
         meta.className = "leg-meta";
         meta.innerHTML = `
@@ -412,6 +459,7 @@ HTML_PAGE = """
           <span>Time: ${leg.duration_min} min</span>
           <span>Vehicle height: ${leg.vehicle_height_m} m</span>
         `;
+
         const bridgesSummary = document.createElement("div");
         bridgesSummary.className = "bridges-summary";
         if (!risky) {
@@ -425,10 +473,28 @@ HTML_PAGE = """
             `<strong>${bridges.length}</strong> low bridge(s). ` +
             `${name} at approx ${first.bridge_height_m} m${extraTxt}.`;
         }
+
         wrapper.appendChild(header);
         wrapper.appendChild(meta);
         wrapper.appendChild(bridgesSummary);
+
+        // Map container
+        const mapId = `leg-map-${idx}`;
+        const mapDiv = document.createElement("div");
+        mapDiv.className = "leg-map";
+        mapDiv.id = mapId;
+        wrapper.appendChild(mapDiv);
+
         legsContainer.appendChild(wrapper);
+
+        // draw map
+        if (leg.geometry && leg.geometry.length) {
+          renderLegMap(leg.geometry, mapId);
+        } else {
+          // no geometry – show a hint
+          mapDiv.innerHTML =
+            '<div class="hint" style="padding:0.6rem;">No map data available for this leg.</div>';
+        }
       });
     }
 
@@ -549,14 +615,27 @@ def geocode_postcode(postcode: str) -> Tuple[float, float]:
     return float(lat), float(lon)
 
 
-def _extract_summary_from_ors(data: Dict[str, Any], raw_text: str) -> Dict[str, float]:
-    """Normalise ORS JSON/GeoJSON into distance_km + duration_min."""
+def _extract_summary_from_ors(data: Dict[str, Any], raw_text: str) -> Dict[str, Any]:
+    """Normalise ORS JSON/GeoJSON into distance_km + duration_min + geometry."""
     summary: Dict[str, Any] | None = None
+    geometry_coords = None
     try:
         if "routes" in data:
-            summary = data["routes"][0]["summary"]
+            route0 = data["routes"][0]
+            summary = route0["summary"]
+            geom = route0.get("geometry")
+            if isinstance(geom, dict):
+                geometry_coords = geom.get("coordinates")
+            else:
+                geometry_coords = geom
         elif "features" in data:
-            summary = data["features"][0]["properties"]["summary"]
+            feat0 = data["features"][0]
+            summary = feat0["properties"]["summary"]
+            geom = feat0.get("geometry")
+            if isinstance(geom, dict):
+                geometry_coords = geom.get("coordinates")
+            else:
+                geometry_coords = geom
         else:
             raise KeyError("Neither 'routes' nor 'features' present")
     except (KeyError, IndexError, TypeError) as e:
@@ -572,8 +651,9 @@ def _extract_summary_from_ors(data: Dict[str, Any], raw_text: str) -> Dict[str, 
     duration_min = float(summary["duration"]) / 60.0
 
     return {
-        "distance_km": round(distance_km, 2),
-        "duration_min": round(duration_min, 1),
+      "distance_km": round(distance_km, 2),
+      "duration_min": round(duration_min, 1),
+      "geometry": geometry_coords,
     }
 
 
@@ -582,7 +662,7 @@ def get_hgv_route_metrics(
     start_lat: float,
     end_lon: float,
     end_lat: float,
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     """Call ORS driving-hgv, falling back to driving-car if needed."""
     if not ORS_API_KEY:
         raise HTTPException(
@@ -699,8 +779,6 @@ def api_route(req: RouteRequest):
             )
 
             low_bridges: List[Dict[str, Any]] = []
-
-            # For now we just expose the nearest bridge if any.
             if result.nearest_bridge is not None:
                 low_bridges.append(
                     {
@@ -721,6 +799,7 @@ def api_route(req: RouteRequest):
                 "duration_min": metrics["duration_min"],
                 "vehicle_height_m": req.vehicle_height_m,
                 "low_bridges": low_bridges,
+                "geometry": metrics.get("geometry"),
             }
             legs_out.append(leg)
 
