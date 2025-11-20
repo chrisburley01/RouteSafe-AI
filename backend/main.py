@@ -1,197 +1,150 @@
 import os
-import math
-from typing import List, Optional, Dict, Any
+from typing import List, Dict, Tuple, Any
 
-import pandas as pd
 import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+
+from bridge_engine import BridgeEngine
 
 
 # -------------------------------------------------------------------
-# Configuration
+# Config
 # -------------------------------------------------------------------
 
 ORS_API_KEY = os.getenv("ORS_API_KEY")
+
 if not ORS_API_KEY:
-    raise RuntimeError(
-        "ORS_API_KEY environment variable is not set. "
-        "Add it in Render → Environment."
-    )
+    # We keep this check here – but the error the user will see comes
+    # from inside the route handler so Render still starts the app.
+    print("WARNING: ORS_API_KEY environment variable is not set.")
 
-BRIDGE_CSV_PATH = os.path.join(os.path.dirname(__file__), "bridge_heights_clean.csv")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BRIDGE_CSV_PATH = os.path.join(BASE_DIR, "bridge_heights_clean.csv")
 
-ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
-ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-hgv"
-
-
-# -------------------------------------------------------------------
-# Utilities
-# -------------------------------------------------------------------
-
-def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Approx distance in metres between two lat/lon points."""
-    R = 6371000.0  # metres
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return R * c
-
-
-# -------------------------------------------------------------------
-# Bridge engine
-# -------------------------------------------------------------------
-
-class BridgeRecord(BaseModel):
-    name: Optional[str]
-    lat: float
-    lon: float
-    height_m: float
-
-
-class BridgeEngine:
-    def __init__(self, csv_path: str):
-        if not os.path.exists(csv_path):
-            raise RuntimeError(f"Bridge CSV not found at {csv_path}")
-
-        df = pd.read_csv(csv_path)
-
-        cols_lower = {c.lower(): c for c in df.columns}
-
-        # Try to detect lat / lon / height columns flexibly
-        def find_col(candidates):
-            for cand in candidates:
-                if cand in cols_lower:
-                    return cols_lower[cand]
-            for c in df.columns:
-                cl = c.lower()
-                if any(cl.startswith(p) for p in candidates):
-                    return c
-            return None
-
-        lat_col = find_col(["lat", "latitude"])
-        lon_col = find_col(["lon", "lng", "longitude"])
-        height_col = find_col(["height_m", "height (m)", "heightm", "height"])
-
-        if not (lat_col and lon_col and height_col):
-            raise RuntimeError(
-                f"Bridge CSV is missing required columns. "
-                f"Found columns: {list(df.columns)}"
-            )
-
-        name_col = find_col(["name", "bridge", "structure"])
-
-        records: List[BridgeRecord] = []
-        for _, row in df.iterrows():
-            try:
-                lat = float(row[lat_col])
-                lon = float(row[lon_col])
-                h = float(row[height_col])
-            except Exception:
-                continue
-
-            name = str(row[name_col]) if name_col and not pd.isna(row[name_col]) else None
-            records.append(BridgeRecord(name=name, lat=lat, lon=lon, height_m=h))
-
-        if not records:
-            raise RuntimeError("No valid bridge records loaded from CSV.")
-
-        self.bridges = records
-
-    def find_low_bridges_between_points(
-        self,
-        a_lat: float,
-        a_lon: float,
-        b_lat: float,
-        b_lon: float,
-        vehicle_height_m: float,
-        height_margin_m: float = 0.0,
-        corridor_km: float = 2.0,
-    ) -> List[Dict[str, Any]]:
-        """
-        Very simple heuristic: take a bounding box around the two points,
-        padded by `corridor_km`, and return any bridges within that box
-        whose height is less than vehicle_height_m + margin.
-        """
-        min_lat = min(a_lat, b_lat)
-        max_lat = max(a_lat, b_lat)
-        min_lon = min(a_lon, b_lon)
-        max_lon = max(a_lon, b_lon)
-
-        # Roughly convert corridor_km to ~degrees (works fine for UK scale)
-        lat_pad = corridor_km / 111.0
-        lon_pad = corridor_km / 70.0  # UK-ish
-
-        min_lat -= lat_pad
-        max_lat += lat_pad
-        min_lon -= lon_pad
-        max_lon += lon_pad
-
-        threshold = vehicle_height_m + height_margin_m
-
-        results: List[Dict[str, Any]] = []
-        for br in self.bridges:
-            if not (min_lat <= br.lat <= max_lat and min_lon <= br.lon <= max_lon):
-                continue
-
-            if br.height_m < threshold:
-                # Approx distance from start, just for info
-                dist_from_start_m = haversine_m(a_lat, a_lon, br.lat, br.lon)
-                results.append(
-                    {
-                        "name": br.name,
-                        "lat": br.lat,
-                        "lon": br.lon,
-                        "bridge_height_m": br.height_m,
-                        "vehicle_height_m": vehicle_height_m,
-                        "distance_from_start_m": round(dist_from_start_m, 1),
-                    }
-                )
-
-        # Sort nearest first
-        results.sort(key=lambda r: r["distance_from_start_m"])
-        return results
-
-
+# Initialise bridge engine once at startup
 bridge_engine = BridgeEngine(BRIDGE_CSV_PATH)
 
 
 # -------------------------------------------------------------------
-# ORS helpers
+# FastAPI setup
 # -------------------------------------------------------------------
 
-def geocode_postcode(postcode: str) -> Dict[str, float]:
-    """Use ORS geocoding to convert postcode → lat/lon."""
+app = FastAPI(title="RouteSafe AI Backend", version="0.1")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # for prototype; tighten later
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# -------------------------------------------------------------------
+# Models
+# -------------------------------------------------------------------
+
+class RouteRequest(BaseModel):
+    depot_postcode: str
+    stops: List[str]
+    vehicle_height_m: float
+
+
+# Optional: shape of each low bridge (we just return dicts, but this is
+# handy for type hints / docs).
+class BridgeOut(BaseModel):
+    name: str | None = None
+    bridge_height_m: float
+    distance_from_start_m: float
+    lat: float
+    lon: float
+
+
+class RouteLegOut(BaseModel):
+    from_postcode: str
+    to_postcode: str
+    distance_km: float
+    duration_min: float
+    vehicle_height_m: float
+    low_bridges: List[BridgeOut]
+
+
+class RouteResponse(BaseModel):
+    legs: List[RouteLegOut]
+
+
+# -------------------------------------------------------------------
+# Helper: ORS geocoding
+# -------------------------------------------------------------------
+
+def geocode_postcode(postcode: str) -> Tuple[float, float]:
+    """
+    Geocode a UK postcode using OpenRouteService.
+
+    Returns:
+        (lat, lon)
+    """
+    if not ORS_API_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="ORS_API_KEY is not configured on the server.",
+        )
+
+    text = postcode.strip().upper()
+    if not text:
+        raise HTTPException(
+            status_code=400, detail="Empty postcode supplied for geocoding."
+        )
+
+    url = "https://api.openrouteservice.org/geocode/search"
     params = {
         "api_key": ORS_API_KEY,
-        "text": postcode,
-        "boundary.country": "GBR",
+        "text": text,
         "size": 1,
+        "boundary.country": "GB",
     }
-    resp = requests.get(ORS_GEOCODE_URL, params=params, timeout=15)
+
+    try:
+        resp = requests.get(url, params=params, timeout=20)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Error calling ORS geocoding for '{text}': {exc}",
+        )
+
     if resp.status_code != 200:
         raise HTTPException(
             status_code=502,
-            detail=f"Geocoding failed for '{postcode}' (status {resp.status_code})",
+            detail=(
+                f"ORS geocoding failed for '{text}' "
+                f"(status {resp.status_code}): {resp.text[:300]}"
+            ),
         )
 
     data = resp.json()
     features = data.get("features") or []
     if not features:
         raise HTTPException(
-            status_code=404,
-            detail=f"Could not geocode postcode '{postcode}'.",
+            status_code=400,
+            detail=f"No geocoding result found for postcode '{text}'.",
         )
 
     coords = features[0]["geometry"]["coordinates"]  # [lon, lat]
-    lon, lat = float(coords[0]), float(coords[1])
-    return {"lat": lat, "lon": lon}
+    if not isinstance(coords, list) or len(coords) < 2:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Unexpected geocoding response for '{text}': {data}",
+        )
 
+    lon, lat = coords[0], coords[1]
+    return float(lat), float(lon)
+
+
+# -------------------------------------------------------------------
+# Helper: ORS routing (UPDATED as requested)
+# -------------------------------------------------------------------
 
 def get_hgv_route_metrics(
     start_lon: float,
@@ -200,154 +153,188 @@ def get_hgv_route_metrics(
     end_lat: float,
 ) -> Dict[str, float]:
     """
-    Call ORS driving-hgv directions and return total distance (km) and duration (minutes).
-    """
-    headers = {"Authorization": ORS_API_KEY, "Content-Type": "application/json"}
-    body = {
-        "coordinates": [
-            [start_lon, start_lat],
-            [end_lon, end_lat],
-        ]
-    }
-    resp = requests.post(ORS_DIRECTIONS_URL, json=body, headers=headers, timeout=25)
+    Call ORS driving-hgv directions and return total distance (km) and
+    duration (minutes). If the HGV profile is not available, we fall
+    back to driving-car.
 
-    if resp.status_code != 200:
+    If ORS responds with an error or unexpected JSON, we raise an
+    HTTPException with the real ORS message so it shows up in the UI.
+    """
+
+    if not ORS_API_KEY:
         raise HTTPException(
-            status_code=502,
-            detail=f"Routing failed (status {resp.status_code}): {resp.text[:200]}",
+            status_code=500,
+            detail="ORS_API_KEY is not configured on the server.",
         )
 
-    data = resp.json()
-    try:
-        summary = data["features"][0]["properties"]["summary"]
-    except (KeyError, IndexError):
-        raise HTTPException(status_code=502, detail="Unexpected routing response.")
+    def call_ors(profile: str):
+        url = f"https://api.openrouteservice.org/v2/directions/{profile}"
+        headers = {
+            "Authorization": ORS_API_KEY,
+            "Content-Type": "application/json",
+        }
+        body = {
+            "coordinates": [
+                [start_lon, start_lat],
+                [end_lon, end_lat],
+            ]
+        }
+        resp = requests.post(url, json=body, headers=headers, timeout=25)
+        return profile, resp
 
-    distance_km = summary["distance"] / 1000.0
-    duration_min = summary["duration"] / 60.0
+    last_error_txt: str | None = None
 
-    return {
-        "distance_km": round(distance_km, 2),
-        "duration_min": round(duration_min, 1),
-    }
+    # Try HGV first, then car
+    for profile in ["driving-hgv", "driving-car"]:
+        profile_used, resp = call_ors(profile)
 
+        if resp.status_code != 200:
+            last_error_txt = (
+                f"{profile_used} status {resp.status_code}: {resp.text[:300]}"
+            )
+            continue
 
-# -------------------------------------------------------------------
-# FastAPI app + CORS
-# -------------------------------------------------------------------
+        data: Dict[str, Any] = resp.json()
 
-app = FastAPI(
-    title="RouteSafe AI",
-    description="Prototype – check HGV routes against low bridges",
-    version="0.1.0",
-)
+        try:
+            summary = data["features"][0]["properties"]["summary"]
+        except (KeyError, IndexError, TypeError):
+            # ORS said OK but the JSON is not what we expect
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"Unexpected routing response from ORS "
+                    f"({profile_used}): {resp.text[:300]}"
+                ),
+            )
 
-# Allow frontend (GitHub Pages etc.) to call this API
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # you can tighten this later to your exact frontend URL
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+        distance_km = summary["distance"] / 1000.0
+        duration_min = summary["duration"] / 60.0
 
+        return {
+            "distance_km": round(distance_km, 2),
+            "duration_min": round(duration_min, 1),
+        }
 
-# -------------------------------------------------------------------
-# Pydantic models
-# -------------------------------------------------------------------
-
-class RouteRequest(BaseModel):
-    depot_postcode: str = Field(..., description="Starting postcode (depot)")
-    stops: List[str] = Field(..., description="List of delivery postcodes in order")
-    vehicle_height_m: float = Field(..., gt=0, description="Vehicle height in metres")
-
-
-class BridgeWarning(BaseModel):
-    name: Optional[str]
-    lat: float
-    lon: float
-    bridge_height_m: float
-    vehicle_height_m: float
-    distance_from_start_m: float
-
-
-class LegResult(BaseModel):
-    from_postcode: str
-    to_postcode: str
-    distance_km: float
-    duration_min: float
-    vehicle_height_m: float
-    low_bridges: List[BridgeWarning]
-
-
-class RouteResponse(BaseModel):
-    legs: List[LegResult]
+    # If both profiles failed:
+    raise HTTPException(
+        status_code=502,
+        detail=f"Routing failed via ORS: {last_error_txt or 'no response'}",
+    )
 
 
 # -------------------------------------------------------------------
-# Endpoints
+# API endpoints
 # -------------------------------------------------------------------
+
+@app.get("/")
+def root():
+    return {"status": "ok", "service": "RouteSafe AI backend"}
+
 
 @app.get("/health")
-def health_check():
-    return {"status": "ok", "bridges_loaded": len(bridge_engine.bridges)}
+def health():
+    return {"ok": True}
 
 
 @app.post("/api/route", response_model=RouteResponse)
-def calculate_route(req: RouteRequest):
+def api_route(req: RouteRequest):
     """
-    Calculate HGV route legs between depot and each stop, check each leg
-    for possible low bridges, and return summary per leg.
+    Main entry point for the frontend.
+
+    1. Geocode depot + stops using ORS.
+    2. Build legs between consecutive points.
+    3. For each leg:
+         - Get distance/time from ORS routing.
+         - Ask BridgeEngine for low-bridge hazards.
     """
 
-    if not req.stops:
-        raise HTTPException(status_code=422, detail="At least one delivery stop is required.")
+    if not ORS_API_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="ORS_API_KEY is not configured on the server.",
+        )
 
-    # Step 1 – geocode all postcodes
-    all_postcodes = [req.depot_postcode] + req.stops
-    coords: Dict[str, Dict[str, float]] = {}
-    for pc in all_postcodes:
-        coords[pc] = geocode_postcode(pc)
+    # Normalise input
+    depot_pc = req.depot_postcode.strip().upper()
+    stops_clean = [s.strip().upper() for s in req.stops if s.strip()]
 
-    # Step 2 – build legs (Depot -> stop1, stop1 -> stop2, ...)
-    legs: List[LegResult] = []
-    chain = all_postcodes
-    for i in range(len(chain) - 1):
-        from_pc = chain[i]
-        to_pc = chain[i + 1]
+    if not depot_pc:
+        raise HTTPException(
+            status_code=400, detail="Depot postcode must not be empty."
+        )
+    if not stops_clean:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one delivery postcode is required.",
+        )
+    if req.vehicle_height_m <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Vehicle height must be a positive number in metres.",
+        )
 
-        start = coords[from_pc]
-        end = coords[to_pc]
+    # 1) Geocode all points
+    points: List[Tuple[float, float]] = []  # (lat, lon)
+    postcodes: List[str] = []
 
-        # ORS route metrics
+    # depot
+    depot_lat, depot_lon = geocode_postcode(depot_pc)
+    points.append((depot_lat, depot_lon))
+    postcodes.append(depot_pc)
+
+    # stops
+    for pc in stops_clean:
+        lat, lon = geocode_postcode(pc)
+        points.append((lat, lon))
+        postcodes.append(pc)
+
+    # 2) Build legs
+    legs_out: List[Dict[str, Any]] = []
+
+    for idx in range(len(points) - 1):
+        start_lat, start_lon = points[idx]
+        end_lat, end_lon = points[idx + 1]
+
         metrics = get_hgv_route_metrics(
-            start_lon=start["lon"],
-            start_lat=start["lat"],
-            end_lon=end["lon"],
-            end_lat=end["lat"],
+            start_lon=start_lon,
+            start_lat=start_lat,
+            end_lon=end_lon,
+            end_lat=end_lat,
         )
 
-        # Bridge checks – simple bounding-box heuristic
-        bridge_dicts = bridge_engine.find_low_bridges_between_points(
-            a_lat=start["lat"],
-            a_lon=start["lon"],
-            b_lat=end["lat"],
-            b_lon=end["lon"],
+        # Find low bridges near this leg
+        low_bridges_raw = bridge_engine.find_low_bridges_for_leg(
+            start_lat=start_lat,
+            start_lon=start_lon,
+            end_lat=end_lat,
+            end_lon=end_lon,
             vehicle_height_m=req.vehicle_height_m,
-            height_margin_m=0.0,
-            corridor_km=2.0,
         )
 
-        warnings = [BridgeWarning(**b) for b in bridge_dicts]
+        # Normalise bridge objects to simple dicts
+        low_bridges: List[Dict[str, Any]] = []
+        for b in low_bridges_raw:
+            low_bridges.append(
+                {
+                    "name": b.get("name"),
+                    "bridge_height_m": float(b.get("bridge_height_m")),
+                    "distance_from_start_m": float(
+                        b.get("distance_from_start_m", 0.0)
+                    ),
+                    "lat": float(b.get("lat")),
+                    "lon": float(b.get("lon")),
+                }
+            )
 
-        leg = LegResult(
-            from_postcode=from_pc.upper(),
-            to_postcode=to_pc.upper(),
-            distance_km=metrics["distance_km"],
-            duration_min=metrics["duration_min"],
-            vehicle_height_m=req.vehicle_height_m,
-            low_bridges=warnings,
-        )
-        legs.append(leg)
+        leg = {
+            "from_postcode": postcodes[idx],
+            "to_postcode": postcodes[idx + 1],
+            "distance_km": metrics["distance_km"],
+            "duration_min": metrics["duration_min"],
+            "vehicle_height_m": req.vehicle_height_m,
+            "low_bridges": low_bridges,
+        }
+        legs_out.append(leg)
 
-    return RouteResponse(legs=legs)
+    return {"legs": legs_out}
