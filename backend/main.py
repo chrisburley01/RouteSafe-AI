@@ -4,10 +4,10 @@ from typing import List, Dict, Tuple, Any
 import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from bridge_engine import BridgeEngine
-
 
 # -------------------------------------------------------------------
 # Config
@@ -16,15 +16,12 @@ from bridge_engine import BridgeEngine
 ORS_API_KEY = os.getenv("ORS_API_KEY")
 
 if not ORS_API_KEY:
-    # Still warn in logs, but let the app start
     print("WARNING: ORS_API_KEY environment variable is not set.")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 BRIDGE_CSV_PATH = os.path.join(BASE_DIR, "bridge_heights_clean.csv")
 
-# Initialise bridge engine once at startup
 bridge_engine = BridgeEngine(BRIDGE_CSV_PATH)
-
 
 # -------------------------------------------------------------------
 # FastAPI setup
@@ -32,15 +29,14 @@ bridge_engine = BridgeEngine(BRIDGE_CSV_PATH)
 
 app = FastAPI(title="RouteSafe AI Backend", version="0.1")
 
-# CORS: for prototype, allow everything (no cookies)
+# CORS: keep open in case you still hit it from GitHub later
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],       # wide open for now
-    allow_credentials=False,   # MUST be false if origin="*"
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # -------------------------------------------------------------------
 # Models
@@ -74,16 +70,459 @@ class RouteResponse(BaseModel):
 
 
 # -------------------------------------------------------------------
-# Helper: ORS geocoding
+# UI HTML served from backend (no CORS issues)
+# -------------------------------------------------------------------
+
+HTML_PAGE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RouteSafe AI · Prototype</title>
+  <style>
+    :root {
+      --primary: #002c77;
+      --primary-dark: #0f2353;
+      --bg: #f3f4f6;
+      --card-bg: #ffffff;
+      --border: #d1d5db;
+      --muted: #6b7280;
+      --danger-bg: #fee2e2;
+      --danger-text: #b91c1c;
+      --radius-lg: 16px;
+      --shadow-card: 0 14px 35px rgba(15, 35, 83, 0.14);
+    }
+    * {
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: #111827;
+    }
+    .hero {
+      background: radial-gradient(circle at top left, #1d4ed8, #020617);
+      color: #e5e7eb;
+      padding: 1.5rem 1rem 1.8rem;
+    }
+    .hero-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
+      margin-bottom: 0.4rem;
+    }
+    .brand-logo {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: #16a34a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.2rem;
+    }
+    .brand-title {
+      font-size: 1.2rem;
+      font-weight: 600;
+    }
+    .hero h1 {
+      margin: 0;
+      font-size: 1.9rem;
+      font-weight: 600;
+    }
+    .hero p {
+      margin: 0.4rem 0 0;
+      font-size: 0.93rem;
+      color: #cbd5f5;
+      max-width: 620px;
+    }
+    .version {
+      margin-top: 0.3rem;
+      font-size: 0.8rem;
+      color: #9ca3af;
+    }
+    .page {
+      max-width: 1100px;
+      margin: -1.5rem auto 0;
+      padding: 0 1rem 2.5rem;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.1fr);
+      gap: 1.2rem;
+    }
+    @media (max-width: 900px) {
+      .layout {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+    .card {
+      background: var(--card-bg);
+      border-radius: var(--radius-lg);
+      padding: 1.2rem 1.3rem 1.4rem;
+      box-shadow: var(--shadow-card);
+      border: 1px solid rgba(15, 35, 83, 0.06);
+    }
+    .card h2 {
+      margin: 0 0 0.3rem;
+      font-size: 1.1rem;
+      color: var(--primary-dark);
+    }
+    .card-subtitle {
+      margin: 0 0 0.8rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .field {
+      margin-bottom: 0.85rem;
+    }
+    label {
+      display: block;
+      font-size: 0.85rem;
+      margin-bottom: 0.25rem;
+      font-weight: 500;
+      color: #374151;
+    }
+    input,
+    textarea {
+      width: 100%;
+      padding: 0.6rem 0.65rem;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      font-size: 0.9rem;
+      background: #f9fafb;
+    }
+    input:focus,
+    textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 1px rgba(0, 44, 119, 0.25);
+      background: #ffffff;
+    }
+    textarea {
+      min-height: 130px;
+      resize: vertical;
+      white-space: pre;
+    }
+    .hint {
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-top: 0.25rem;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+      padding: 0.65rem 1.35rem;
+      border-radius: 999px;
+      border: none;
+      background: #00b894;
+      color: #ffffff;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 10px 24px rgba(0, 184, 148, 0.35);
+      margin-top: 0.3rem;
+    }
+    .btn:hover {
+      background: #02a184;
+      box-shadow: 0 12px 26px rgba(0, 184, 148, 0.4);
+      transform: translateY(-1px);
+    }
+    .btn:disabled {
+      opacity: 0.65;
+      cursor: default;
+    }
+    .status {
+      margin-top: 0.8rem;
+      font-size: 0.83rem;
+    }
+    .status-error {
+      background: var(--danger-bg);
+      color: var(--danger-text);
+      border-radius: 10px;
+      padding: 0.65rem 0.75rem;
+    }
+    .status-ok {
+      color: #047857;
+    }
+    .legs-list {
+      margin-top: 0.5rem;
+      border-top: 1px solid #e5e7eb;
+      padding-top: 0.6rem;
+      max-height: 420px;
+      overflow-y: auto;
+      font-size: 0.86rem;
+    }
+    .leg {
+      border-radius: 10px;
+      border: 1px solid #e5e7eb;
+      padding: 0.6rem 0.65rem;
+      margin-bottom: 0.5rem;
+      background: #f9fafb;
+    }
+    .leg-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 0.3rem;
+    }
+    .leg-title {
+      font-weight: 600;
+      color: #111827;
+      font-size: 0.92rem;
+    }
+    .pill {
+      padding: 0.05rem 0.55rem;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .pill-safe {
+      background: #d1fae5;
+      color: #047857;
+    }
+    .pill-risk {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    .leg-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem 0.8rem;
+      font-size: 0.78rem;
+      color: #4b5563;
+      margin-bottom: 0.3rem;
+    }
+    .bridges-summary {
+      font-size: 0.78rem;
+      color: #4b5563;
+    }
+    .bridges-summary strong {
+      font-weight: 600;
+    }
+    footer {
+      margin-top: 1.3rem;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <div class="hero-inner">
+      <div class="brand-row">
+        <div class="brand-logo">🛣️</div>
+        <div class="brand-title">RouteSafe AI</div>
+      </div>
+      <h1>Build a safe HGV route</h1>
+      <p>
+        Keep your existing drop order — RouteSafe AI checks every leg for low bridges using ORS + a UK bridge dataset.
+      </p>
+      <div class="version">Prototype v0.1 | Internal Use Only</div>
+    </div>
+  </div>
+
+  <div class="page">
+    <div class="layout">
+      <div class="card">
+        <h2>Route details</h2>
+        <p class="card-subtitle">Enter depot, height and postcodes in order.</p>
+
+        <form id="route-form">
+          <div class="field">
+            <label>Depot postcode</label>
+            <input id="depot" type="text" value="LS270BN" />
+          </div>
+
+          <div class="field">
+            <label>Vehicle / trailer height (m)</label>
+            <input id="height" type="number" step="0.1" value="4.0" />
+            <div class="hint">Full running height.</div>
+          </div>
+
+          <div class="field">
+            <label>Delivery postcodes in order</label>
+            <textarea id="stops">Hd5 0rl</textarea>
+            <div class="hint">One postcode per line.</div>
+          </div>
+
+          <button class="btn" id="generate-btn">Generate safe legs</button>
+          <div id="status" class="status"></div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Route legs</h2>
+        <p class="card-subtitle">Each leg checked for low bridges.</p>
+        <div id="legs-container" class="legs-list">
+          <div class="hint">
+            Enter route on the left and click <strong>Generate</strong>.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      Data source: OpenRouteService + internal UK low bridge dataset.
+    </footer>
+  </div>
+
+  <script>
+    // Same-origin: relative URL, no CORS problems
+    const BACKEND_URL = "/api/route";
+
+    const form = document.getElementById("route-form");
+    const statusEl = document.getElementById("status");
+    const legsContainer = document.getElementById("legs-container");
+    const generateBtn = document.getElementById("generate-btn");
+
+    function setStatus(msg, type = "info") {
+      if (!msg) {
+        statusEl.textContent = "";
+        statusEl.className = "status";
+        return;
+      }
+      statusEl.textContent = msg;
+      statusEl.className =
+        type === "error" ? "status status-error" : "status status-ok";
+    }
+
+    function renderLegs(legs) {
+      legsContainer.innerHTML = "";
+      if (!legs || !legs.length) {
+        legsContainer.innerHTML =
+          '<div class="hint">No legs returned from backend.</div>';
+        return;
+      }
+
+      legs.forEach((leg, idx) => {
+        const bridges = leg.low_bridges || [];
+        const risky = bridges.length > 0;
+
+        const wrapper = document.createElement("div");
+        wrapper.className = "leg";
+
+        const header = document.createElement("div");
+        header.className = "leg-header";
+
+        const title = document.createElement("div");
+        title.className = "leg-title";
+        title.textContent = `Leg ${idx + 1}: ${leg.from_postcode} \u2192 ${leg.to_postcode}`;
+
+        const pill = document.createElement("div");
+        pill.className = "pill " + (risky ? "pill-risk" : "pill-safe");
+        pill.textContent = risky ? "LOW BRIDGE(S)" : "HGV SAFE";
+
+        header.appendChild(title);
+        header.appendChild(pill);
+
+        const meta = document.createElement("div");
+        meta.className = "leg-meta";
+        meta.innerHTML = `
+          <span>Distance: ${leg.distance_km} km</span>
+          <span>Time: ${leg.duration_min} min</span>
+          <span>Vehicle height: ${leg.vehicle_height_m} m</span>
+        `;
+
+        const bridgesSummary = document.createElement("div");
+        bridgesSummary.className = "bridges-summary";
+        if (!risky) {
+          bridgesSummary.textContent = "No low bridges on this leg.";
+        } else {
+          const first = bridges[0];
+          const name = first.name || "Bridge";
+          const extra = bridges.length - 1;
+          const extraTxt = extra > 0 ? ` (+${extra} more)` : "";
+          bridgesSummary.innerHTML =
+            `<strong>${bridges.length}</strong> low bridge(s). ` +
+            `${name} at approx ${first.bridge_height_m} m${extraTxt}.`;
+        }
+
+        wrapper.appendChild(header);
+        wrapper.appendChild(meta);
+        wrapper.appendChild(bridgesSummary);
+        legsContainer.appendChild(wrapper);
+      });
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const depot = document.getElementById("depot").value.trim();
+      const height = parseFloat(document.getElementById("height").value);
+      const stops = document
+        .getElementById("stops")
+        .value.split("\\n")
+        .map((x) => x.trim())
+        .filter((x) => x.length > 0);
+
+      if (!depot || stops.length === 0) {
+        setStatus("Enter depot + at least one postcode.", "error");
+        return;
+      }
+
+      if (!height || height <= 0) {
+        setStatus("Vehicle height must be a positive number in metres.", "error");
+        return;
+      }
+
+      setStatus("Contacting backend...");
+      generateBtn.disabled = true;
+
+      try {
+        const resp = await fetch(BACKEND_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            depot_postcode: depot,
+            vehicle_height_m: height,
+            stops: stops,
+          }),
+        });
+
+        const text = await resp.text();
+        let data = null;
+        try {
+          data = JSON.parse(text);
+        } catch {}
+
+        if (!resp.ok) {
+          const errMsg =
+            (data && (data.detail || data.message)) ||
+            `Status ${resp.status}`;
+          throw new Error(errMsg);
+        }
+
+        renderLegs(data.legs);
+        setStatus("Route generated successfully.");
+      } catch (err) {
+        console.error(err);
+        setStatus("Backend error: " + (err.message || err), "error");
+        legsContainer.innerHTML =
+          '<div class="hint">No results – backend returned an error.</div>';
+      } finally {
+        generateBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
+"""
+
+# -------------------------------------------------------------------
+# Helpers: ORS geocoding + routing
 # -------------------------------------------------------------------
 
 def geocode_postcode(postcode: str) -> Tuple[float, float]:
-    """
-    Geocode a UK postcode using OpenRouteService.
-
-    Returns:
-        (lat, lon)
-    """
     if not ORS_API_KEY:
         raise HTTPException(
             status_code=500,
@@ -130,36 +569,16 @@ def geocode_postcode(postcode: str) -> Tuple[float, float]:
         )
 
     coords = features[0]["geometry"]["coordinates"]  # [lon, lat]
-    if not isinstance(coords, list) or len(coords) < 2:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Unexpected geocoding response for '{text}': {data}",
-        )
-
     lon, lat = coords[0], coords[1]
     return float(lat), float(lon)
 
 
-# -------------------------------------------------------------------
-# Helper: ORS routing
-# -------------------------------------------------------------------
-
 def _extract_summary_from_ors(data: Dict[str, Any], raw_text: str) -> Dict[str, float]:
-    """
-    ORS can return either:
-      - JSON:    { "routes": [ { "summary": {...} } ] }
-      - GeoJSON: { "features": [ { "properties": { "summary": {...} } } ] }
-
-    This helper normalises both into {distance_km, duration_min}.
-    """
     summary: Dict[str, Any] | None = None
-
     try:
         if "routes" in data:
-            # Standard JSON format
             summary = data["routes"][0]["summary"]
         elif "features" in data:
-            # GeoJSON format
             summary = data["features"][0]["properties"]["summary"]
         else:
             raise KeyError("Neither 'routes' nor 'features' present")
@@ -187,12 +606,6 @@ def get_hgv_route_metrics(
     end_lon: float,
     end_lat: float,
 ) -> Dict[str, float]:
-    """
-    Call ORS driving-hgv directions and return total distance (km) and
-    duration (minutes). If the HGV profile is not available, we fall
-    back to driving-car.
-    """
-
     if not ORS_API_KEY:
         raise HTTPException(
             status_code=500,
@@ -205,18 +618,12 @@ def get_hgv_route_metrics(
             "Authorization": ORS_API_KEY,
             "Content-Type": "application/json",
         }
-        body = {
-            "coordinates": [
-                [start_lon, start_lat],
-                [end_lon, end_lat],
-            ]
-        }
+        body = {"coordinates": [[start_lon, start_lat], [end_lon, end_lat]]}
         resp = requests.post(url, json=body, headers=headers, timeout=25)
         return profile, resp
 
     last_error_txt: str | None = None
 
-    # Try HGV first, then car
     for profile in ["driving-hgv", "driving-car"]:
         profile_used, resp = call_ors(profile)
 
@@ -228,11 +635,8 @@ def get_hgv_route_metrics(
 
         raw_text = resp.text
         data: Dict[str, Any] = resp.json()
-
-        # Normalise JSON/GeoJSON via helper
         return _extract_summary_from_ors(data, raw_text)
 
-    # If both profiles failed:
     raise HTTPException(
         status_code=502,
         detail=f"Routing failed via ORS: {last_error_txt or 'no response'}",
@@ -243,35 +647,24 @@ def get_hgv_route_metrics(
 # API endpoints
 # -------------------------------------------------------------------
 
-@app.get("/")
-def root():
-    return {"status": "ok", "service": "RouteSafe AI backend"}
+@app.get("/", response_class=HTMLResponse)
+def serve_ui():
+    return HTMLResponse(content=HTML_PAGE, status_code=200)
 
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "service": "RouteSafe AI backend"}
 
 
 @app.post("/api/route", response_model=RouteResponse)
 def api_route(req: RouteRequest):
-    """
-    Main entry point for the frontend.
-
-    1. Geocode depot + stops using ORS.
-    2. Build legs between consecutive points.
-    3. For each leg:
-         - Get distance/time from ORS routing.
-         - Ask BridgeEngine for low-bridge hazards.
-    """
-
     if not ORS_API_KEY:
         raise HTTPException(
             status_code=500,
             detail="ORS_API_KEY is not configured on the server.",
         )
 
-    # Normalise input
     depot_pc = req.depot_postcode.strip().upper()
     stops_clean = [s.strip().upper() for s in req.stops if s.strip()]
 
@@ -290,22 +683,18 @@ def api_route(req: RouteRequest):
             detail="Vehicle height must be a positive number in metres.",
         )
 
-    # 1) Geocode all points
-    points: List[Tuple[float, float]] = []  # (lat, lon)
+    points: List[Tuple[float, float]] = []
     postcodes: List[str] = []
 
-    # depot
     depot_lat, depot_lon = geocode_postcode(depot_pc)
     points.append((depot_lat, depot_lon))
     postcodes.append(depot_pc)
 
-    # stops
     for pc in stops_clean:
         lat, lon = geocode_postcode(pc)
         points.append((lat, lon))
         postcodes.append(pc)
 
-    # 2) Build legs
     legs_out: List[Dict[str, Any]] = []
 
     for idx in range(len(points) - 1):
@@ -319,7 +708,6 @@ def api_route(req: RouteRequest):
             end_lat=end_lat,
         )
 
-        # Find low bridges near this leg
         low_bridges_raw = bridge_engine.find_low_bridges_for_leg(
             start_lat=start_lat,
             start_lon=start_lon,
@@ -328,7 +716,6 @@ def api_route(req: RouteRequest):
             vehicle_height_m=req.vehicle_height_m,
         )
 
-        # Normalise bridge objects to simple dicts
         low_bridges: List[Dict[str, Any]] = []
         for b in low_bridges_raw:
             low_bridges.append(
