@@ -33,10 +33,15 @@ bridge_engine = BridgeEngine(BRIDGE_CSV_PATH)
 
 app = FastAPI(title="RouteSafe AI Backend", version="0.1")
 
+# CORS: allow GitHub Pages frontend + local dev
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # for prototype; tighten later
-    allow_credentials=True,
+    allow_origins=[
+        "https://chrisburley01.github.io",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ],
+    allow_credentials=False,  # no cookies / auth needed for this prototype
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -141,7 +146,7 @@ def geocode_postcode(postcode: str) -> Tuple[float, float]:
 
 
 # -------------------------------------------------------------------
-# Helper: ORS routing (UPDATED)
+# Helper: ORS routing
 # -------------------------------------------------------------------
 
 def _extract_summary_from_ors(data: Dict[str, Any], raw_text: str) -> Dict[str, float]:
