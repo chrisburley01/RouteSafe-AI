@@ -1,209 +1,81 @@
-<<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <title>RouteSafe AI – prototype v0.1</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-
-  <!-- Optional: your existing CSS file -->
   <link rel="stylesheet" href="styles.css" />
-  <style>
-    /* Minimal safety styles so it’s not naked if styles.css is missing */
-    body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      margin: 0;
-      background: #f4f7fb;
-      color: #0f2353;
-    }
-    .page {
-      max-width: 960px;
-      margin: 0 auto;
-      padding: 1.5rem 1rem 4rem;
-    }
-    header {
-      margin-bottom: 1.5rem;
-    }
-    h1 {
-      margin: 0 0 0.25rem;
-      font-size: 1.7rem;
-    }
-    .subtitle {
-      margin: 0;
-      color: #4b5b88;
-      font-size: 0.95rem;
-    }
-    .card {
-      background: #fff;
-      border-radius: 1rem;
-      padding: 1.25rem 1.5rem;
-      box-shadow: 0 8px 20px rgba(0,0,0,0.05);
-      margin-bottom: 1.5rem;
-    }
-    label {
-      font-weight: 600;
-      display: block;
-      margin-bottom: 0.35rem;
-    }
-    input[type="text"],
-    input[type="number"],
-    textarea {
-      width: 100%;
-      padding: 0.6rem 0.75rem;
-      border-radius: 0.6rem;
-      border: 1px solid #ccd3ea;
-      font-size: 0.95rem;
-      box-sizing: border-box;
-    }
-    textarea {
-      min-height: 80px;
-      resize: vertical;
-    }
-    .field {
-      margin-bottom: 1rem;
-    }
-    .hint {
-      font-size: 0.8rem;
-      color: #6c7aa8;
-      margin-top: 0.25rem;
-    }
-    .button-primary {
-      display: inline-block;
-      padding: 0.75rem 1.6rem;
-      border-radius: 999px;
-      border: none;
-      cursor: pointer;
-      font-weight: 600;
-      font-size: 1rem;
-      background: #002c77;
-      color: #fff;
-    }
-    .status {
-      margin-top: 0.75rem;
-      font-size: 0.9rem;
-    }
-    .status-info { color: #0053a6; }
-    .status-success { color: #0c7a3c; }
-    .status-error { color: #b3261e; }
-    .route-summary {
-      margin-bottom: 0.75rem;
-      font-size: 0.95rem;
-    }
-    .route-legs-list {
-      display: flex;
-      flex-direction: column;
-      gap: 0.9rem;
-    }
-    .route-leg-card {
-      border-radius: 0.9rem;
-      border: 1px solid #dde3f5;
-      padding: 0.85rem 0.9rem;
-      background: #fff;
-    }
-    .route-leg-header {
-      margin-bottom: 0.3rem;
-    }
-    .route-leg-meta span + span {
-      margin-left: 0.35rem;
-    }
-    .route-leg-link {
-      margin: 0.4rem 0;
-      font-size: 0.9rem;
-    }
-    .bridge-warnings {
-      padding-left: 1.1rem;
-      margin: 0.25rem 0 0.2rem;
-      font-size: 0.9rem;
-    }
-    .no-warnings {
-      font-size: 0.9rem;
-      color: #0c7a3c;
-      margin: 0.25rem 0 0;
-    }
-    footer {
-      text-align: center;
-      margin-top: 1.5rem;
-      font-size: 0.8rem;
-      color: #7c88b0;
-    }
-  </style>
 </head>
 <body>
-  <div class="page">
-    <header>
+  <main class="page">
+    <header class="header">
       <h1>RouteSafe AI</h1>
-      <p class="subtitle">Prototype – checks low bridges on your planned route.</p>
+      <p class="tagline">Prototype – check HGV routes against low bridges</p>
     </header>
 
-    <!-- INPUT CARD -->
-    <main>
-      <section class="card">
-        <form id="route-form">
-          <div class="field">
-            <label for="depot-postcode">Depot postcode</label>
-            <input
-              id="depot-postcode"
-              type="text"
-              autocomplete="postal-code"
-              placeholder="e.g. LS27 0BN"
-            />
-            <p class="hint">Start point for the route.</p>
-          </div>
+    <section class="card">
+      <h2>Route details</h2>
 
-          <div class="field">
-            <label for="stops-input">Stop postcodes (one per line)</label>
-            <textarea
-              id="stops-input"
-              placeholder="e.g.&#10;HD5 0RL&#10;HG1 3DT"
-            ></textarea>
-            <p class="hint">Each line is a stop in order: 1, 2, 3…</p>
-          </div>
+      <div class="field">
+        <label for="depot">Depot postcode</label>
+        <input id="depot" type="text" placeholder="LS27 0BN" />
+      </div>
 
-          <div class="field">
-            <label for="vehicle-height">Vehicle height (metres)</label>
-            <input
-              id="vehicle-height"
-              type="number"
-              step="0.01"
-              min="0"
-              placeholder="e.g. 4.95"
-            />
-            <p class="hint">Height overall including any roof kit.</p>
-          </div>
+      <div class="field">
+        <label for="stops">
+          Delivery postcodes
+          <span class="hint">(one per line)</span>
+        </label>
+        <textarea id="stops" rows="5" placeholder="HG1 3DT&#10;HD5 0RL"></textarea>
+      </div>
 
-          <!-- OCR upload (can wire later) -->
-          <div class="field">
-            <label for="plan-photo">Photo of your printed plan <span style="font-weight:400;">(BETA)</span></label>
-            <input id="plan-photo" type="file" accept="image/*" />
-            <p class="hint">
-              Optional – not wired up yet in this clean version. Core bridge checks work from the postcodes above.
-            </p>
-          </div>
+      <div class="field inline">
+        <div>
+          <label for="vehicleHeight">Vehicle height (m)</label>
+          <input
+            id="vehicleHeight"
+            type="number"
+            step="0.05"
+            min="2.0"
+            max="6.5"
+            value="4.0"
+          />
+        </div>
+      </div>
 
-          <button type="submit" class="button-primary">
-            Generate safe legs
-          </button>
-
-          <p id="route-status" class="status"></p>
-        </form>
-      </section>
-
-      <!-- RESULTS CARD -->
-      <section class="card">
-        <h2 style="margin-top:0;">Route legs</h2>
+      <div class="field">
+        <label for="planFile">
+          Photo of your printed plan <span class="hint">(BETA – optional)</span>
+        </label>
+        <input id="planFile" type="file" accept="image/*" />
         <p class="hint">
-          Each leg is calculated in your order. Distance/time are approximate
-          until we plug in the HGV router.
+          Optional – not wired up yet in this clean version.
+          Core bridge checks work from the postcodes above.
         </p>
-        <div id="route-results"></div>
-      </section>
-    </main>
+      </div>
 
-    <footer>
-      RouteSafe AI · prototype v0.1
+      <button id="generateBtn" class="primary-btn">
+        Generate safe legs
+      </button>
+
+      <p id="status" class="status"></p>
+    </section>
+
+    <section class="card">
+      <h2>Route legs</h2>
+      <p class="hint">
+        Each leg is calculated in your order. Distance/time are approximate
+        until we plug in the HGV router.
+      </p>
+
+      <div id="legsContainer" class="legs-container"></div>
+    </section>
+
+    <footer class="footer">
+      <span>RouteSafe AI · prototype v0.1</span>
     </footer>
-  </div>
+  </main>
 
-  <!-- Frontend logic -->
   <script src="app.js"></script>
 </body>
 </html>
