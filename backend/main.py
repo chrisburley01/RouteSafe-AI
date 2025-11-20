@@ -1,261 +1,136 @@
-# backend/main.py
-
 import os
-from typing import List, Tuple, Optional, Dict, Any
-
-import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-
 from bridge_engine import BridgeEngine
+import requests
+import json
 
-
-# -----------------------------------------------------------------------------
-# Config
-# -----------------------------------------------------------------------------
-
-ORS_API_KEY = os.getenv("ORS_API_KEY")
-
-if not ORS_API_KEY:
-    # Fast fail if the key is missing – easier to diagnose
-    raise RuntimeError("ORS_API_KEY environment variable is not set")
-
-# Path to the bridge CSV – must be in the same folder as this file on Render
-BRIDGE_CSV_PATH = "bridge_heights_clean.csv"
-
-# How close a bridge has to be to the route line to be "in conflict" (metres)
-SEARCH_RADIUS_M = 300.0
-CONFLICT_CLEARANCE_M = 0.0   # 0m = anything lower than vehicle height
-NEAR_CLEARANCE_M = 0.25      # within 25cm is also flagged
-
-
-# -----------------------------------------------------------------------------
-# App + CORS
-# -----------------------------------------------------------------------------
-
-app = FastAPI(title="RouteSafe AI Backend", version="0.3")
+# ---------------------------------------------------
+# FASTAPI SETUP
+# ---------------------------------------------------
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://chrisburley01.github.io",
-        "http://localhost:4173",
-        "http://localhost:5173",
-        "*",  # relax for now during testing
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# ---------------------------------------------------
+# LOAD ENV VARS
+# ---------------------------------------------------
+ORS_API_KEY = os.getenv("ORS_API_KEY")
 
-# -----------------------------------------------------------------------------
-# Bridge engine
-# -----------------------------------------------------------------------------
+if not ORS_API_KEY:
+    raise RuntimeError("ORS_API_KEY is missing in Render environment variables.")
 
-try:
-    bridge_engine = BridgeEngine(
-        csv_path=BRIDGE_CSV_PATH,
-        search_radius_m=SEARCH_RADIUS_M,
-        conflict_clearance_m=CONFLICT_CLEARANCE_M,
-        near_clearance_m=NEAR_CLEARANCE_M,
-    )
-except Exception as e:
-    # If this blows up you’ll see it clearly in Render logs
-    raise RuntimeError(f"Failed to load bridge CSV '{BRIDGE_CSV_PATH}': {e}")
+# ---------------------------------------------------
+# LOAD BRIDGE ENGINE
+# ---------------------------------------------------
+bridge_engine = BridgeEngine("bridge_heights_clean.csv")
 
-
-# -----------------------------------------------------------------------------
-# Models
-# -----------------------------------------------------------------------------
-
+# ---------------------------------------------------
+# REQUEST MODEL FOR /api/route
+# ---------------------------------------------------
 class RouteRequest(BaseModel):
     depot_postcode: str
-    stop_postcodes: List[str]
+    stops: list[str]
     vehicle_height_m: float
 
-
-class LegResponse(BaseModel):
-    from_postcode: str
-    to_postcode: str
-    distance_km: float
-    duration_min: float
-    low_bridge: bool
-    min_clearance_m: Optional[float] = None
-    offending_bridges: List[Dict[str, Any]] = []
-
-
-class RouteResponse(BaseModel):
-    total_distance_km: float
-    total_duration_min: float
-    legs: List[LegResponse]
-
-
-# -----------------------------------------------------------------------------
-# Helpers – ORS
-# -----------------------------------------------------------------------------
-
-def geocode_postcode(postcode: str) -> Tuple[float, float]:
-    """
-    Geocode using OpenRouteService Search API.
-    Returns (lat, lon).
-    """
-    url = "https://api.openrouteservice.org/geocode/search"
+# ---------------------------------------------------
+# UTILITY — geocode postcode using ORS
+# ---------------------------------------------------
+def geocode_postcode(postcode: str):
+    url = f"https://api.openrouteservice.org/geocode/search"
     params = {
         "api_key": ORS_API_KEY,
         "text": postcode,
-        "boundary.country": "GB",
         "size": 1,
+        "boundary.country": "GB"
     }
+    r = requests.get(url, params=params)
 
-    try:
-        resp = requests.get(url, params=params, timeout=10)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"ORS geocode error: {e}")
+    if r.status_code != 200:
+        raise RuntimeError(f"ORS geocoding error: {r.text}")
 
-    if resp.status_code != 200:
-        raise HTTPException(
-            status_code=502,
-            detail=f"ORS geocode HTTP {resp.status_code}: {resp.text}",
-        )
+    data = r.json()
+    if not data["features"]:
+        raise RuntimeError(f"Postcode not found: {postcode}")
 
-    data = resp.json()
-    features = data.get("features", [])
-    if not features:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Could not geocode postcode '{postcode}'",
-        )
-
-    coords = features[0]["geometry"]["coordinates"]
-    lon, lat = coords[0], coords[1]
+    lon, lat = data["features"][0]["geometry"]["coordinates"]
     return lat, lon
 
-
-def ors_route(
-    start_lat: float,
-    start_lon: float,
-    end_lat: float,
-    end_lon: float,
-) -> Tuple[float, float, List[Tuple[float, float]]]:
-    """
-    Call ORS Directions (driving-hgv) for a single leg.
-    Returns (distance_km, duration_min, list_of_(lat, lon) along route).
-    """
+# ---------------------------------------------------
+# ROUTING USING ORS
+# ---------------------------------------------------
+def get_route(lat1, lon1, lat2, lon2):
     url = "https://api.openrouteservice.org/v2/directions/driving-hgv"
-    params = {
-        "api_key": ORS_API_KEY,
-        "start": f"{start_lon},{start_lat}",
-        "end": f"{end_lon},{end_lat}",
+    payload = {
+        "coordinates": [
+            [lon1, lat1],
+            [lon2, lat2]
+        ],
+        "profile": "driving-hgv",
+        "extra_info": ["height"],
     }
 
-    try:
-        resp = requests.get(url, params=params, timeout=20)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"ORS directions error: {e}")
+    headers = {
+        "Authorization": ORS_API_KEY,
+        "Content-Type": "application/json"
+    }
 
-    if resp.status_code != 200:
-        raise HTTPException(
-            status_code=502,
-            detail=f"ORS directions HTTP {resp.status_code}: {resp.text}",
+    r = requests.post(url, headers=headers, data=json.dumps(payload))
+
+    if r.status_code != 200:
+        raise RuntimeError(f"ORS routing error: {r.text}")
+
+    return r.json()
+
+# ---------------------------------------------------
+# 📌 MAIN ENDPOINT — /api/route
+# ---------------------------------------------------
+@app.post("/api/route")
+def generate_safe_route(req: RouteRequest):
+    depot_lat, depot_lon = geocode_postcode(req.depot_postcode)
+
+    results = []
+    last_lat, last_lon = depot_lat, depot_lon
+
+    for stop in req.stops:
+        stop_lat, stop_lon = geocode_postcode(stop)
+
+        route_data = get_route(last_lat, last_lon, stop_lat, stop_lon)
+
+        # Check for bridges along the path
+        bridge_hits = bridge_engine.check_route_for_bridges(
+            last_lat, last_lon, stop_lat, stop_lon, req.vehicle_height_m
         )
 
-    data = resp.json()
-    features = data.get("features", [])
-    if not features:
-        raise HTTPException(
-            status_code=502,
-            detail="ORS directions response missing features",
-        )
+        results.append({
+            "from": req.depot_postcode,
+            "to": stop,
+            "route_data": route_data,
+            "bridge_hits": bridge_hits
+        })
 
-    props = features[0]["properties"]
-    summary = props.get("summary", {})
-    distance_m = summary.get("distance", 0.0)
-    duration_s = summary.get("duration", 0.0)
+        last_lat, last_lon = stop_lat, stop_lon
 
-    geometry = features[0]["geometry"]
-    coords = geometry.get("coordinates", [])
-    # ORS coords are [lon, lat]; convert to (lat, lon)
-    route_points = [(c[1], c[0]) for c in coords]
+    return {"legs": results}
 
-    distance_km = distance_m / 1000.0
-    duration_min = duration_s / 60.0
+# ---------------------------------------------------
+# 📌 OCR ENDPOINT — /api/ocr  (kept separate)
+# ---------------------------------------------------
+@app.post("/api/ocr")
+async def ocr_image(file: UploadFile = File(...)):
+    data = await file.read()
+    # Dummy return — your OCR model would go here
+    return {"filename": file.filename, "text": "OCR placeholder"}
 
-    return distance_km, duration_min, route_points
-
-
-# -----------------------------------------------------------------------------
-# Endpoints
-# -----------------------------------------------------------------------------
-
+# ---------------------------------------------------
+# ROOT TEST
+# ---------------------------------------------------
 @app.get("/")
-def root():
-    return {"status": "ok", "service": "RouteSafe AI backend"}
-
-
-@app.get("/health")
-def health():
-    return {"status": "healthy"}
-
-
-@app.post("/api/route", response_model=RouteResponse)
-def calculate_route(req: RouteRequest):
-    """
-    Main endpoint used by the front end.
-    - Geocodes depot + stops with ORS
-    - Gets ORS HGV route for each leg
-    - Checks each leg against UK bridge CSV
-    """
-    if not req.stop_postcodes:
-        raise HTTPException(status_code=400, detail="At least one stop is required")
-
-    # Cache geocodes so we don't call ORS twice for the same postcode
-    geo_cache: Dict[str, Tuple[float, float]] = {}
-
-    def get_latlon(pc: str) -> Tuple[float, float]:
-        if pc not in geo_cache:
-            geo_cache[pc] = geocode_postcode(pc)
-        return geo_cache[pc]
-
-    all_points = [req.depot_postcode] + req.stop_postcodes
-
-    legs: List[LegResponse] = []
-    total_distance_km = 0.0
-    total_duration_min = 0.0
-
-    for i in range(len(all_points) - 1):
-        from_pc = all_points[i]
-        to_pc = all_points[i + 1]
-
-        from_lat, from_lon = get_latlon(from_pc)
-        to_lat, to_lon = get_latlon(to_pc)
-
-        distance_km, duration_min, route_points = ors_route(
-            from_lat, from_lon, to_lat, to_lon
-        )
-
-        # Bridge analysis
-        analysis = bridge_engine.analyze_route(
-            route_points, vehicle_height_m=req.vehicle_height_m
-        )
-
-        leg = LegResponse(
-            from_postcode=from_pc,
-            to_postcode=to_pc,
-            distance_km=round(distance_km, 2),
-            duration_min=round(duration_min, 1),
-            low_bridge=analysis.get("conflicting", False),
-            min_clearance_m=analysis.get("min_clearance_m"),
-            offending_bridges=analysis.get("bridges", []),
-        )
-
-        legs.append(leg)
-        total_distance_km += distance_km
-        total_duration_min += duration_min
-
-    return RouteResponse(
-        total_distance_km=round(total_distance_km, 2),
-        total_duration_min=round(total_duration_min, 1),
-        legs=legs,
-    )
+def home():
+    return {"status": "OK", "message": "RouteSafe AI backend running."}
