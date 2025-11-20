@@ -5,281 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>RouteSafe AI · Prototype</title>
 
-  <style>
-    :root {
-      --primary: #002c77;
-      --primary-dark: #0f2353;
-      --bg: #f3f4f6;
-      --card-bg: #ffffff;
-      --border: #d1d5db;
-      --muted: #6b7280;
-      --danger-bg: #fee2e2;
-      --danger-text: #b91c1c;
-      --radius-lg: 16px;
-      --shadow-card: 0 14px 35px rgba(15, 35, 83, 0.14);
-    }
+  <link rel="stylesheet" href="styles.css" />
 
-    * {
-      box-sizing: border-box;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-        sans-serif;
-    }
-
-    body {
-      margin: 0;
-      padding: 0;
-      background: var(--bg);
-      color: #111827;
-    }
-
-    .hero {
-      background: radial-gradient(circle at top left, #1d4ed8, #020617);
-      color: #e5e7eb;
-      padding: 1.5rem 1rem 1.8rem;
-    }
-
-    .hero-inner {
-      max-width: 1100px;
-      margin: 0 auto;
-    }
-
-    .brand-row {
-      display: flex;
-      align-items: center;
-      gap: 0.7rem;
-      margin-bottom: 0.4rem;
-    }
-
-    .brand-logo {
-      width: 36px;
-      height: 36px;
-      border-radius: 10px;
-      background: #16a34a;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.2rem;
-    }
-
-    .brand-title {
-      font-size: 1.2rem;
-      font-weight: 600;
-    }
-
-    .hero h1 {
-      margin: 0;
-      font-size: 1.9rem;
-      font-weight: 600;
-    }
-
-    .hero p {
-      margin: 0.4rem 0 0;
-      font-size: 0.93rem;
-      color: #cbd5f5;
-      max-width: 620px;
-    }
-
-    .version {
-      margin-top: 0.3rem;
-      font-size: 0.8rem;
-      color: #9ca3af;
-    }
-
-    .page {
-      max-width: 1100px;
-      margin: -1.5rem auto 0;
-      padding: 0 1rem 2.5rem;
-    }
-
-    .layout {
-      display: grid;
-      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.1fr);
-      gap: 1.2rem;
-    }
-
-    @media (max-width: 900px) {
-      .layout {
-        grid-template-columns: minmax(0, 1fr);
-      }
-    }
-
-    .card {
-      background: var(--card-bg);
-      border-radius: var(--radius-lg);
-      padding: 1.2rem 1.3rem 1.4rem;
-      box-shadow: var(--shadow-card);
-      border: 1px solid rgba(15, 35, 83, 0.06);
-    }
-
-    .card h2 {
-      margin: 0 0 0.3rem;
-      font-size: 1.1rem;
-      color: var(--primary-dark);
-    }
-
-    .card-subtitle {
-      margin: 0 0 0.8rem;
-      font-size: 0.85rem;
-      color: var(--muted);
-    }
-
-    .field {
-      margin-bottom: 0.85rem;
-    }
-
-    label {
-      display: block;
-      font-size: 0.85rem;
-      margin-bottom: 0.25rem;
-      font-weight: 500;
-      color: #374151;
-    }
-
-    input,
-    textarea {
-      width: 100%;
-      padding: 0.6rem 0.65rem;
-      border-radius: 10px;
-      border: 1px solid var(--border);
-      font-size: 0.9rem;
-      background: #f9fafb;
-    }
-
-    input:focus,
-    textarea:focus {
-      border-color: var(--primary);
-      box-shadow: 0 0 0 1px rgba(0, 44, 119, 0.25);
-      background: #ffffff;
-    }
-
-    textarea {
-      min-height: 130px;
-      resize: vertical;
-      white-space: pre;
-    }
-
-    .hint {
-      font-size: 0.78rem;
-      color: var(--muted);
-      margin-top: 0.25rem;
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.35rem;
-      padding: 0.65rem 1.35rem;
-      border-radius: 999px;
-      border: none;
-      background: #00b894;
-      color: #ffffff;
-      font-size: 0.9rem;
-      font-weight: 600;
-      cursor: pointer;
-      box-shadow: 0 10px 24px rgba(0, 184, 148, 0.35);
-      margin-top: 0.3rem;
-    }
-
-    .btn:hover {
-      background: #02a184;
-      box-shadow: 0 12px 26px rgba(0, 184, 148, 0.4);
-      transform: translateY(-1px);
-    }
-
-    .btn:disabled {
-      opacity: 0.65;
-      cursor: default;
-    }
-
-    .status {
-      margin-top: 0.8rem;
-      font-size: 0.83rem;
-    }
-
-    .status-error {
-      background: var(--danger-bg);
-      color: var(--danger-text);
-      border-radius: 10px;
-      padding: 0.65rem 0.75rem;
-    }
-
-    .status-ok {
-      color: #047857;
-    }
-
-    .legs-list {
-      margin-top: 0.5rem;
-      border-top: 1px solid #e5e7eb;
-      padding-top: 0.6rem;
-      max-height: 420px;
-      overflow-y: auto;
-      font-size: 0.86rem;
-    }
-
-    .leg {
-      border-radius: 10px;
-      border: 1px solid #e5e7eb;
-      padding: 0.6rem 0.65rem;
-      margin-bottom: 0.5rem;
-      background: #f9fafb;
-    }
-
-    .leg-header {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 0.3rem;
-    }
-
-    .leg-title {
-      font-weight: 600;
-      color: #111827;
-      font-size: 0.92rem;
-    }
-
-    .pill {
-      padding: 0.05rem 0.55rem;
-      border-radius: 999px;
-      font-size: 0.7rem;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-
-    .pill-safe {
-      background: #d1fae5;
-      color: #047857;
-    }
-
-    .pill-risk {
-      background: #fef3c7;
-      color: #92400e;
-    }
-
-    .leg-meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.4rem 0.8rem;
-      font-size: 0.78rem;
-      color: #4b5563;
-      margin-bottom: 0.3rem;
-    }
-
-    .bridges-summary {
-      font-size: 0.78rem;
-      color: #4b5563;
-    }
-    .bridges-summary strong {
-      font-weight: 600;
-    }
-
-    footer {
-      margin-top: 1.3rem;
-      font-size: 0.78rem;
-      color: var(--muted);
-    }
-  </style>
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    crossorigin=""
+  />
 </head>
-
 <body>
   <div class="hero">
     <div class="hero-inner">
@@ -289,7 +23,8 @@
       </div>
       <h1>Build a safe HGV route</h1>
       <p>
-        Keep your existing drop order — RouteSafe AI checks every leg for low bridges using ORS + a UK bridge dataset.
+        Keep your drop order – RouteSafe AI checks each leg for low bridges
+        using OpenRouteService + a UK bridge dataset.
       </p>
       <div class="version">Prototype v0.1 | Internal Use Only</div>
     </div>
@@ -297,12 +32,12 @@
 
   <div class="page">
     <div class="layout">
-
-      <!-- LEFT -->
+      <!-- LEFT: form -->
       <div class="card">
         <h2>Route details</h2>
-        <p class="card-subtitle">Enter depot, height and postcodes in order.</p>
-
+        <p class="card-subtitle">
+          Enter depot, height and postcodes in order.
+        </p>
         <form id="route-form">
           <div class="field">
             <label>Depot postcode</label>
@@ -326,10 +61,14 @@
         </form>
       </div>
 
-      <!-- RIGHT -->
+      <!-- RIGHT: map + legs -->
       <div class="card">
-        <h2>Route legs</h2>
-        <p class="card-subtitle">Each leg checked for low bridges.</p>
+        <h2>Route map & legs</h2>
+        <p class="card-subtitle">
+          Map preview plus each leg checked for low bridges.
+        </p>
+
+        <div id="map"></div>
 
         <div id="legs-container" class="legs-list">
           <div class="hint">
@@ -337,125 +76,20 @@
           </div>
         </div>
       </div>
-
     </div>
 
     <footer>
-      Data source: OpenRouteService + internal UK low bridge dataset.
+      Data source: OpenRouteService directions + internal UK low bridge
+      dataset (beta).
     </footer>
   </div>
 
-  <script>
-    const BACKEND_URL = "https://routesafe-ai.onrender.com/api/route";
+  <!-- Leaflet JS -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    crossorigin=""
+  ></script>
 
-    const form = document.getElementById("route-form");
-    const statusEl = document.getElementById("status");
-    const legsContainer = document.getElementById("legs-container");
-    const generateBtn = document.getElementById("generate-btn");
-
-    function setStatus(msg, type = "info") {
-      if (!msg) {
-        statusEl.textContent = "";
-        statusEl.className = "status";
-        return;
-      }
-      statusEl.textContent = msg;
-      statusEl.className =
-        type === "error" ? "status status-error" : "status status-ok";
-    }
-
-    function renderLegs(legs) {
-      legsContainer.innerHTML = "";
-      legs.forEach((leg, idx) => {
-        const bridges = leg.low_bridges || [];
-        const risky = bridges.length > 0;
-
-        const wrapper = document.createElement("div");
-        wrapper.className = "leg";
-
-        wrapper.innerHTML = `
-          <div class="leg-header">
-            <div class="leg-title">Leg ${idx + 1}: ${leg.from_postcode} → ${
-          leg.to_postcode
-        }</div>
-            <div class="pill ${risky ? "pill-risk" : "pill-safe"}">
-              ${risky ? "LOW BRIDGE(S)" : "HGV SAFE"}
-            </div>
-          </div>
-
-          <div class="leg-meta">
-            <span>Distance: ${leg.distance_km} km</span>
-            <span>Time: ${leg.duration_min} min</span>
-            <span>Vehicle height: ${leg.vehicle_height_m} m</span>
-          </div>
-
-          <div class="bridges-summary">
-            ${
-              risky
-                ? `<strong>${bridges.length}</strong> low bridge(s) detected.`
-                : `No low bridges on this leg.`
-            }
-          </div>
-        `;
-
-        legsContainer.appendChild(wrapper);
-      });
-    }
-
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-
-      const depot = document.getElementById("depot").value.trim();
-      const height = parseFloat(document.getElementById("height").value);
-      const stops = document
-        .getElementById("stops")
-        .value.split("\n")
-        .map((x) => x.trim())
-        .filter((x) => x.length > 0);
-
-      if (!depot || stops.length === 0) {
-        setStatus("Enter depot + at least one postcode.", "error");
-        return;
-      }
-
-      setStatus("Contacting backend...");
-      generateBtn.disabled = true;
-
-      try {
-        const resp = await fetch(BACKEND_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            depot_postcode: depot,
-            vehicle_height_m: height,
-            stops: stops,
-          }),
-        });
-
-        const text = await resp.text();
-        let data = null;
-        try {
-          data = JSON.parse(text);
-        } catch {}
-
-        if (!resp.ok) {
-          const errMsg =
-            (data && (data.detail || data.message)) ||
-            `Status ${resp.status}`;
-          throw new Error(errMsg);
-        }
-
-        renderLegs(data.legs);
-        setStatus("Route generated successfully.");
-      } catch (err) {
-        console.error(err);
-        setStatus("Failed to contact backend: " + err.message, "error");
-        legsContainer.innerHTML =
-          '<div class="hint">No results – backend unreachable.</div>';
-      } finally {
-        generateBtn.disabled = false;
-      }
-    });
-  </script>
+  <script src="app.js" defer></script>
 </body>
 </html>
