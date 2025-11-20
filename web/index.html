@@ -2,78 +2,468 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>RouteSafe AI – Prototype</title>
-  <link rel="stylesheet" href="styles.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RouteSafe AI · Prototype</title>
+  <style>
+    :root {
+      --primary: #002c77;
+      --primary-dark: #0f2353;
+      --bg: #f3f4f6;
+      --card-bg: #ffffff;
+      --border: #d1d5db;
+      --danger-bg: #fee2e2;
+      --danger-text: #b91c1c;
+      --muted: #6b7280;
+      --radius-lg: 12px;
+      --shadow-card: 0 10px 25px rgba(15, 35, 83, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: #111827;
+    }
+
+    .page {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 1.5rem 1rem 3rem;
+    }
+
+    header {
+      margin-bottom: 1.5rem;
+    }
+
+    header h1 {
+      font-size: 1.75rem;
+      margin: 0;
+      color: var(--primary-dark);
+    }
+
+    header p {
+      margin: 0.25rem 0 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .version {
+      margin-top: 0.25rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr);
+      gap: 1rem;
+    }
+
+    @media (max-width: 800px) {
+      .grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
+    .card {
+      background: var(--card-bg);
+      border-radius: var(--radius-lg);
+      padding: 1rem 1.1rem 1.2rem;
+      box-shadow: var(--shadow-card);
+      border: 1px solid rgba(15, 35, 83, 0.04);
+    }
+
+    .card h2 {
+      margin: 0 0 0.4rem;
+      font-size: 1.15rem;
+      color: var(--primary-dark);
+    }
+
+    .card-subtitle {
+      margin: 0 0 1rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    label {
+      display: block;
+      font-size: 0.85rem;
+      margin-bottom: 0.25rem;
+      font-weight: 500;
+      color: #374151;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    textarea {
+      width: 100%;
+      padding: 0.55rem 0.6rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    input[type="text"]:focus,
+    input[type="number"]:focus,
+    textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 1px rgba(0, 44, 119, 0.2);
+    }
+
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+      white-space: pre;
+    }
+
+    .hint {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 0.25rem;
+    }
+
+    .field {
+      margin-bottom: 0.8rem;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      padding: 0.55rem 1.1rem;
+      border-radius: 999px;
+      border: none;
+      background: var(--primary);
+      color: #ffffff;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 8px 18px rgba(0, 44, 119, 0.25);
+      transition: transform 0.08s ease, box-shadow 0.08s ease,
+        background 0.1s ease;
+    }
+
+    .btn:hover {
+      background: #003894;
+      box-shadow: 0 10px 22px rgba(0, 44, 119, 0.3);
+      transform: translateY(-1px);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+      box-shadow: 0 6px 14px rgba(0, 44, 119, 0.2);
+    }
+
+    .btn[disabled] {
+      opacity: 0.7;
+      cursor: default;
+      box-shadow: none;
+      transform: none;
+    }
+
+    .status {
+      margin-top: 0.7rem;
+      font-size: 0.85rem;
+    }
+
+    .status-error {
+      background: var(--danger-bg);
+      color: var(--danger-text);
+      border-radius: 10px;
+      padding: 0.7rem 0.8rem;
+    }
+
+    .status-ok {
+      color: #047857;
+    }
+
+    .legs-list {
+      margin-top: 0.5rem;
+      border-top: 1px solid #e5e7eb;
+      padding-top: 0.6rem;
+      max-height: 420px;
+      overflow-y: auto;
+      font-size: 0.86rem;
+    }
+
+    .leg-item {
+      padding: 0.55rem 0.35rem;
+      border-radius: 8px;
+      border: 1px solid #e5e7eb;
+      margin-bottom: 0.4rem;
+      background: #f9fafb;
+    }
+
+    .leg-title {
+      font-weight: 600;
+      margin-bottom: 0.15rem;
+      color: #111827;
+    }
+
+    .leg-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 0.7rem;
+      font-size: 0.78rem;
+      color: #4b5563;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.05rem 0.5rem;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+
+    .pill-safe {
+      background: #d1fae5;
+      color: #047857;
+    }
+
+    .pill-warning {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    footer {
+      margin-top: 1.3rem;
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-align: left;
+    }
+  </style>
 </head>
 <body>
   <div class="page">
-    <header class="page-header">
+    <header>
       <h1>RouteSafe AI</h1>
-      <p class="subtitle">Prototype · Check HGV routes against low bridges</p>
+      <p>Prototype · Check HGV routes against low bridges.</p>
+      <div class="version">Prototype v0.1</div>
     </header>
 
-    <main class="layout">
-      <!-- Left card: inputs -->
-      <section class="card card-inputs">
+    <div class="grid">
+      <!-- LEFT: form -->
+      <div class="card">
         <h2>Route details</h2>
-
-        <div class="form-group">
-          <label for="depot-postcode">Depot postcode</label>
-          <input id="depot-postcode" type="text" placeholder="LS27 0BN" />
-        </div>
-
-        <div class="form-group">
-          <label for="stops">Delivery postcodes <span class="hint">(one per line)</span></label>
-          <textarea
-            id="stops"
-            rows="5"
-            placeholder="HD5 0RL&#10;HG1 3DT"
-          ></textarea>
-        </div>
-
-        <div class="form-group form-inline">
-          <div>
-            <label for="vehicle-height">Vehicle height (m)</label>
-            <input id="vehicle-height" type="number" step="0.1" value="4.0" />
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label for="plan-file">
-            Photo of your printed plan <span class="beta-tag">BETA</span>
-            <span class="hint">(optional – not wired up in this clean version)</span>
-          </label>
-          <input id="plan-file" type="file" disabled />
-        </div>
-
-        <button id="generate-btn" class="btn-primary">
-          Generate safe legs
-        </button>
-
-        <div id="error-box" class="error-box" hidden></div>
-      </section>
-
-      <!-- Right card: results -->
-      <section class="card card-results">
-        <h2>Route legs</h2>
-        <p class="hint">
-          Each leg is calculated in your order. Distance / time are approximate
-          until we plug in the full HGV router.
+        <p class="card-subtitle">
+          Enter your depot, vehicle height and delivery postcodes in order.
         </p>
-        <div id="route-legs" class="legs-container">
-          <p class="placeholder">
+
+        <form id="route-form">
+          <div class="field">
+            <label for="depot">Depot postcode</label>
+            <input
+              id="depot"
+              name="depot"
+              type="text"
+              autocomplete="postal-code"
+              value="LS270BN"
+            />
+          </div>
+
+          <div class="field">
+            <label for="height">Vehicle / trailer height (m)</label>
+            <input
+              id="height"
+              name="height"
+              type="number"
+              step="0.1"
+              min="2.0"
+              value="4.0"
+            />
+            <div class="hint">Use full running height including trailer.</div>
+          </div>
+
+          <div class="field">
+            <label for="stops">Delivery postcodes in order</label>
+            <textarea
+              id="stops"
+              name="stops"
+              spellcheck="false"
+              placeholder="One postcode per line&#10;HD5 0RL&#10;LS1 1AA"
+            >Hd5 0rl</textarea>
+            <div class="hint">
+              One stop per line. Keep the order you want to deliver.
+            </div>
+          </div>
+
+          <button type="submit" class="btn" id="generate-btn">
+            Generate safe legs
+          </button>
+
+          <div id="status" class="status" aria-live="polite"></div>
+        </form>
+      </div>
+
+      <!-- RIGHT: output -->
+      <div class="card">
+        <h2>Route legs</h2>
+        <p class="card-subtitle">
+          Each leg is calculated in your order. Distance / time are approximate
+          until the full HGV router is wired in.
+        </p>
+
+        <div id="legs-container" class="legs-list">
+          <div class="hint">
             Enter your route on the left and click
             <strong>Generate safe legs</strong> to see results here.
-          </p>
+          </div>
         </div>
-      </section>
-    </main>
+      </div>
+    </div>
 
-    <footer class="page-footer">
-      <span>RouteSafe AI · prototype v0.1</span>
+    <footer>
+      RouteSafe AI prototype · Internal use only · ORS directions with low
+      bridge overlay (beta).
     </footer>
   </div>
 
-  <script src="app.js"></script>
+  <script>
+    // TODO: set this to your real backend endpoint:
+    // e.g. 'https://your-app.onrender.com/api/route'
+    const BACKEND_URL = 'https://YOUR-BACKEND-URL-HERE/api/route';
+
+    const form = document.getElementById('route-form');
+    const statusEl = document.getElementById('status');
+    const legsContainer = document.getElementById('legs-container');
+    const generateBtn = document.getElementById('generate-btn');
+
+    function setStatus(message, type = 'info') {
+      if (!message) {
+        statusEl.textContent = '';
+        statusEl.className = 'status';
+        return;
+      }
+      if (type === 'error') {
+        statusEl.className = 'status status-error';
+        statusEl.textContent = message;
+      } else {
+        statusEl.className = 'status status-ok';
+        statusEl.textContent = message;
+      }
+    }
+
+    function renderLegs(legs) {
+      if (!legs || !legs.length) {
+        legsContainer.innerHTML =
+          '<div class="hint">No legs returned from backend.</div>';
+        return;
+      }
+
+      legsContainer.innerHTML = '';
+
+      legs.forEach((leg, idx) => {
+        const item = document.createElement('div');
+        item.className = 'leg-item';
+
+        const title = document.createElement('div');
+        title.className = 'leg-title';
+        title.textContent = `Leg ${idx + 1}: ${leg.from} → ${leg.to}`;
+
+        const meta = document.createElement('div');
+        meta.className = 'leg-meta';
+
+        const dist = document.createElement('span');
+        dist.textContent = `Distance: ${leg.distance_km?.toFixed
+          ? leg.distance_km.toFixed(1)
+          : leg.distance_km || '?'
+          } km`;
+
+        const time = document.createElement('span');
+        time.textContent = `Time: ${leg.duration_min?.toFixed
+          ? leg.duration_min.toFixed(0)
+          : leg.duration_min || '?'
+          } min`;
+
+        const height = document.createElement('span');
+        height.textContent = `Min bridge: ${leg.min_bridge_m ?? '?'} m`;
+
+        const pill = document.createElement('span');
+        pill.className =
+          'pill ' + (leg.hgv_safe ? 'pill-safe' : 'pill-warning');
+        pill.textContent = leg.hgv_safe ? 'HGV SAFE' : 'CHECK HEIGHT';
+
+        meta.appendChild(dist);
+        meta.appendChild(time);
+        meta.appendChild(height);
+        meta.appendChild(pill);
+
+        item.appendChild(title);
+        item.appendChild(meta);
+        legsContainer.appendChild(item);
+      });
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const depot = document.getElementById('depot').value.trim();
+      const height = parseFloat(
+        document.getElementById('height').value.trim() || '0'
+      );
+      const stopsRaw = document.getElementById('stops').value;
+
+      const deliveryPostcodes = stopsRaw
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+
+      if (!depot || !deliveryPostcodes.length) {
+        setStatus(
+          'Please enter a depot postcode and at least one delivery postcode.',
+          'error'
+        );
+        return;
+      }
+
+      setStatus('Contacting backend…');
+      generateBtn.disabled = true;
+
+      try {
+        const response = await fetch(BACKEND_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            depot_postcode: depot,
+            vehicle_height_m: height,
+            delivery_postcodes: deliveryPostcodes,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Backend returned ' + response.status);
+        }
+
+        const data = await response.json();
+        renderLegs(data.legs || data); // supports either {legs: []} or [] directly
+        setStatus('Route generated successfully.');
+      } catch (err) {
+        console.error(err);
+        setStatus(
+          'Failed to contact backend. Please check the backend URL and CORS settings.',
+          'error'
+        );
+        legsContainer.innerHTML =
+          '<div class="hint">No results – backend could not be reached.</div>';
+      } finally {
+        generateBtn.disabled = false;
+      }
+    });
+  </script>
 </body>
 </html>
