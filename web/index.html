@@ -462,4 +462,107 @@
           } km</span>
           <span>Time: ${leg.duration_min?.toFixed
             ? leg.duration_min.toFixed(0)
-            : leg.duration
+            : leg.duration_min
+          } min</span>
+          <span>Vehicle height: ${leg.vehicle_height_m} m</span>
+        `;
+
+        const bridgesSummary = document.createElement('div');
+        bridgesSummary.className = 'bridges-summary';
+        if (!hasRisk) {
+          bridgesSummary.textContent = 'No low bridges flagged on this leg.';
+        } else {
+          const first = bridges[0];
+          const name = first.name || 'Bridge';
+          const countExtra = bridges.length - 1;
+          const extraText = countExtra > 0 ? ` (+${countExtra} more)` : '';
+          bridgesSummary.innerHTML =
+            `<strong>${bridges.length}</strong> low bridge(s). ` +
+            `${name} at approx ${first.bridge_height_m.toFixed
+              ? first.bridge_height_m.toFixed(2)
+              : first.bridge_height_m
+            } m${extraText}. Min bridge height: <strong>${minBridgeText}</strong>.`;
+        }
+
+        wrapper.appendChild(header);
+        wrapper.appendChild(meta);
+        wrapper.appendChild(bridgesSummary);
+        legsContainer.appendChild(wrapper);
+      });
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const depot = document.getElementById('depot').value.trim();
+      const heightRaw = document.getElementById('height').value.trim();
+      const height = parseFloat(heightRaw || '0');
+      const stopsRaw = document.getElementById('stops').value;
+
+      const stops = stopsRaw
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+
+      if (!depot || stops.length === 0) {
+        setStatus(
+          'Please enter a depot postcode and at least one delivery postcode.',
+          'error'
+        );
+        return;
+      }
+
+      if (!height || height <= 0) {
+        setStatus('Vehicle height must be a positive number in metres.', 'error');
+        return;
+      }
+
+      setStatus('Contacting backend…');
+      generateBtn.disabled = true;
+
+      try {
+        const resp = await fetch(BACKEND_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            depot_postcode: depot,
+            vehicle_height_m: height,
+            stops: stops,
+          }),
+        });
+
+        const text = await resp.text();
+        let data = null;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch {
+          // leave as text
+        }
+
+        if (!resp.ok) {
+          const detail =
+            (data && (data.detail || data.message)) ||
+            `Status ${resp.status}`;
+          throw new Error(detail);
+        }
+
+        const legs = data && data.legs ? data.legs : [];
+        renderLegs(legs);
+        setStatus('Route generated successfully.');
+      } catch (err) {
+        console.error(err);
+        setStatus(
+          'Failed to contact backend: ' + (err.message || err),
+          'error'
+        );
+        legsContainer.innerHTML =
+          '<div class="hint">No results – backend could not be reached or returned an error.</div>';
+      } finally {
+        generateBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
