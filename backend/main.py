@@ -29,7 +29,7 @@ bridge_engine = BridgeEngine(BRIDGE_CSV_PATH)
 
 app = FastAPI(title="RouteSafe AI Backend", version="0.1")
 
-# CORS: keep open in case you still hit it from GitHub later
+# Leave CORS open in case we ever serve from another domain again
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -324,9 +324,7 @@ HTML_PAGE = """
         <div class="brand-title">RouteSafe AI</div>
       </div>
       <h1>Build a safe HGV route</h1>
-      <p>
-        Keep your existing drop order — RouteSafe AI checks every leg for low bridges using ORS + a UK bridge dataset.
-      </p>
+      <p>Keep your drop order – RouteSafe AI checks each leg for low bridges using ORS + a UK bridge dataset.</p>
       <div class="version">Prototype v0.1 | Internal Use Only</div>
     </div>
   </div>
@@ -336,48 +334,37 @@ HTML_PAGE = """
       <div class="card">
         <h2>Route details</h2>
         <p class="card-subtitle">Enter depot, height and postcodes in order.</p>
-
         <form id="route-form">
           <div class="field">
             <label>Depot postcode</label>
             <input id="depot" type="text" value="LS270BN" />
           </div>
-
           <div class="field">
             <label>Vehicle / trailer height (m)</label>
             <input id="height" type="number" step="0.1" value="4.0" />
             <div class="hint">Full running height.</div>
           </div>
-
           <div class="field">
             <label>Delivery postcodes in order</label>
             <textarea id="stops">Hd5 0rl</textarea>
             <div class="hint">One postcode per line.</div>
           </div>
-
           <button class="btn" id="generate-btn">Generate safe legs</button>
           <div id="status" class="status"></div>
         </form>
       </div>
-
       <div class="card">
         <h2>Route legs</h2>
         <p class="card-subtitle">Each leg checked for low bridges.</p>
         <div id="legs-container" class="legs-list">
-          <div class="hint">
-            Enter route on the left and click <strong>Generate</strong>.
-          </div>
+          <div class="hint">Enter route on the left and click <strong>Generate</strong>.</div>
         </div>
       </div>
     </div>
-
-    <footer>
-      Data source: OpenRouteService + internal UK low bridge dataset.
-    </footer>
+    <footer>Data source: OpenRouteService + internal UK low bridge dataset.</footer>
   </div>
 
   <script>
-    // Same-origin: relative URL, no CORS problems
     const BACKEND_URL = "/api/route";
 
     const form = document.getElementById("route-form");
@@ -403,28 +390,21 @@ HTML_PAGE = """
           '<div class="hint">No legs returned from backend.</div>';
         return;
       }
-
       legs.forEach((leg, idx) => {
         const bridges = leg.low_bridges || [];
         const risky = bridges.length > 0;
-
         const wrapper = document.createElement("div");
         wrapper.className = "leg";
-
         const header = document.createElement("div");
         header.className = "leg-header";
-
         const title = document.createElement("div");
         title.className = "leg-title";
-        title.textContent = `Leg ${idx + 1}: ${leg.from_postcode} \u2192 ${leg.to_postcode}`;
-
+        title.textContent = `Leg ${idx + 1}: ${leg.from_postcode} → ${leg.to_postcode}`;
         const pill = document.createElement("div");
         pill.className = "pill " + (risky ? "pill-risk" : "pill-safe");
         pill.textContent = risky ? "LOW BRIDGE(S)" : "HGV SAFE";
-
         header.appendChild(title);
         header.appendChild(pill);
-
         const meta = document.createElement("div");
         meta.className = "leg-meta";
         meta.innerHTML = `
@@ -432,7 +412,6 @@ HTML_PAGE = """
           <span>Time: ${leg.duration_min} min</span>
           <span>Vehicle height: ${leg.vehicle_height_m} m</span>
         `;
-
         const bridgesSummary = document.createElement("div");
         bridgesSummary.className = "bridges-summary";
         if (!risky) {
@@ -446,7 +425,6 @@ HTML_PAGE = """
             `<strong>${bridges.length}</strong> low bridge(s). ` +
             `${name} at approx ${first.bridge_height_m} m${extraTxt}.`;
         }
-
         wrapper.appendChild(header);
         wrapper.appendChild(meta);
         wrapper.appendChild(bridgesSummary);
@@ -456,7 +434,6 @@ HTML_PAGE = """
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
-
       const depot = document.getElementById("depot").value.trim();
       const height = parseFloat(document.getElementById("height").value);
       const stops = document
@@ -475,7 +452,7 @@ HTML_PAGE = """
         return;
       }
 
-      setStatus("Contacting backend...");
+      setStatus("Contacting backend…");
       generateBtn.disabled = true;
 
       try {
@@ -491,9 +468,7 @@ HTML_PAGE = """
 
         const text = await resp.text();
         let data = null;
-        try {
-          data = JSON.parse(text);
-        } catch {}
+        try { data = JSON.parse(text); } catch {}
 
         if (!resp.ok) {
           const errMsg =
@@ -523,6 +498,7 @@ HTML_PAGE = """
 # -------------------------------------------------------------------
 
 def geocode_postcode(postcode: str) -> Tuple[float, float]:
+    """Geocode a UK postcode using ORS. Returns (lat, lon)."""
     if not ORS_API_KEY:
         raise HTTPException(
             status_code=500,
@@ -574,6 +550,7 @@ def geocode_postcode(postcode: str) -> Tuple[float, float]:
 
 
 def _extract_summary_from_ors(data: Dict[str, Any], raw_text: str) -> Dict[str, float]:
+    """Normalise ORS JSON/GeoJSON into distance_km + duration_min."""
     summary: Dict[str, Any] | None = None
     try:
         if "routes" in data:
@@ -606,6 +583,7 @@ def get_hgv_route_metrics(
     end_lon: float,
     end_lat: float,
 ) -> Dict[str, float]:
+    """Call ORS driving-hgv, falling back to driving-car if needed."""
     if not ORS_API_KEY:
         raise HTTPException(
             status_code=500,
@@ -659,85 +637,99 @@ def health():
 
 @app.post("/api/route", response_model=RouteResponse)
 def api_route(req: RouteRequest):
-    if not ORS_API_KEY:
-        raise HTTPException(
-            status_code=500,
-            detail="ORS_API_KEY is not configured on the server.",
-        )
-
-    depot_pc = req.depot_postcode.strip().upper()
-    stops_clean = [s.strip().upper() for s in req.stops if s.strip()]
-
-    if not depot_pc:
-        raise HTTPException(
-            status_code=400, detail="Depot postcode must not be empty."
-        )
-    if not stops_clean:
-        raise HTTPException(
-            status_code=400,
-            detail="At least one delivery postcode is required.",
-        )
-    if req.vehicle_height_m <= 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Vehicle height must be a positive number in metres.",
-        )
-
-    points: List[Tuple[float, float]] = []
-    postcodes: List[str] = []
-
-    depot_lat, depot_lon = geocode_postcode(depot_pc)
-    points.append((depot_lat, depot_lon))
-    postcodes.append(depot_pc)
-
-    for pc in stops_clean:
-        lat, lon = geocode_postcode(pc)
-        points.append((lat, lon))
-        postcodes.append(pc)
-
-    legs_out: List[Dict[str, Any]] = []
-
-    for idx in range(len(points) - 1):
-        start_lat, start_lon = points[idx]
-        end_lat, end_lon = points[idx + 1]
-
-        metrics = get_hgv_route_metrics(
-            start_lon=start_lon,
-            start_lat=start_lat,
-            end_lon=end_lon,
-            end_lat=end_lat,
-        )
-
-        low_bridges_raw = bridge_engine.find_low_bridges_for_leg(
-            start_lat=start_lat,
-            start_lon=start_lon,
-            end_lat=end_lat,
-            end_lon=end_lon,
-            vehicle_height_m=req.vehicle_height_m,
-        )
-
-        low_bridges: List[Dict[str, Any]] = []
-        for b in low_bridges_raw:
-            low_bridges.append(
-                {
-                    "name": b.get("name"),
-                    "bridge_height_m": float(b.get("bridge_height_m")),
-                    "distance_from_start_m": float(
-                        b.get("distance_from_start_m", 0.0)
-                    ),
-                    "lat": float(b.get("lat")),
-                    "lon": float(b.get("lon")),
-                }
+    """Main entry point for the frontend."""
+    try:
+        if not ORS_API_KEY:
+            raise HTTPException(
+                status_code=500,
+                detail="ORS_API_KEY is not configured on the server.",
             )
 
-        leg = {
-            "from_postcode": postcodes[idx],
-            "to_postcode": postcodes[idx + 1],
-            "distance_km": metrics["distance_km"],
-            "duration_min": metrics["duration_min"],
-            "vehicle_height_m": req.vehicle_height_m,
-            "low_bridges": low_bridges,
-        }
-        legs_out.append(leg)
+        depot_pc = req.depot_postcode.strip().upper()
+        stops_clean = [s.strip().upper() for s in req.stops if s.strip()]
 
-    return {"legs": legs_out}
+        if not depot_pc:
+            raise HTTPException(
+                status_code=400, detail="Depot postcode must not be empty."
+            )
+        if not stops_clean:
+            raise HTTPException(
+                status_code=400,
+                detail="At least one delivery postcode is required.",
+            )
+        if req.vehicle_height_m <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Vehicle height must be a positive number in metres.",
+            )
+
+        # Geocode all points
+        points: List[Tuple[float, float]] = []
+        postcodes: List[str] = []
+
+        depot_lat, depot_lon = geocode_postcode(depot_pc)
+        points.append((depot_lat, depot_lon))
+        postcodes.append(depot_pc)
+
+        for pc in stops_clean:
+            lat, lon = geocode_postcode(pc)
+            points.append((lat, lon))
+            postcodes.append(pc)
+
+        # Build legs
+        legs_out: List[Dict[str, Any]] = []
+
+        for idx in range(len(points) - 1):
+            start_lat, start_lon = points[idx]
+            end_lat, end_lon = points[idx + 1]
+
+            metrics = get_hgv_route_metrics(
+                start_lon=start_lon,
+                start_lat=start_lat,
+                end_lon=end_lon,
+                end_lat=end_lat,
+            )
+
+            low_bridges_raw = bridge_engine.find_low_bridges_for_leg(
+                start_lat=start_lat,
+                start_lon=start_lon,
+                end_lat=end_lat,
+                end_lon=end_lon,
+                vehicle_height_m=req.vehicle_height_m,
+            )
+
+            low_bridges: List[Dict[str, Any]] = []
+            for b in low_bridges_raw:
+                low_bridges.append(
+                    {
+                        "name": b.get("name"),
+                        "bridge_height_m": float(b.get("bridge_height_m")),
+                        "distance_from_start_m": float(
+                            b.get("distance_from_start_m", 0.0)
+                        ),
+                        "lat": float(b.get("lat")),
+                        "lon": float(b.get("lon")),
+                    }
+                )
+
+            leg = {
+                "from_postcode": postcodes[idx],
+                "to_postcode": postcodes[idx + 1],
+                "distance_km": metrics["distance_km"],
+                "duration_min": metrics["duration_min"],
+                "vehicle_height_m": req.vehicle_height_m,
+                "low_bridges": low_bridges,
+            }
+            legs_out.append(leg)
+
+        return {"legs": legs_out}
+
+    except HTTPException:
+        # Let FastAPI handle these normally
+        raise
+    except Exception as e:
+        # Catch any unexpected error so we see the message in the UI
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected server error: {e}",
+        )
