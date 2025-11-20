@@ -72,8 +72,7 @@ class RouteResponse(BaseModel):
 # UI HTML (served by backend – no CORS issues)
 # -------------------------------------------------------------------
 
-HTML_PAGE = """
-<!DOCTYPE html>
+HTML_PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -682,6 +681,7 @@ def api_route(req: RouteRequest):
             start_lat, start_lon = points[idx]
             end_lat, end_lon = points[idx + 1]
 
+            # 1) Distance / time from ORS
             metrics = get_hgv_route_metrics(
                 start_lon=start_lon,
                 start_lat=start_lat,
@@ -689,30 +689,29 @@ def api_route(req: RouteRequest):
                 end_lat=end_lat,
             )
 
-            # ---- LOW BRIDGE LOOKUP (robust to older BridgeEngine versions) ----
-            if hasattr(bridge_engine, "find_low_bridges_for_leg"):
-                low_bridges_raw = bridge_engine.find_low_bridges_for_leg(
-                    start_lat=start_lat,
-                    start_lon=start_lon,
-                    end_lat=end_lat,
-                    end_lon=end_lon,
-                    vehicle_height_m=req.vehicle_height_m,
-                )
-            else:
-                # Older / simpler BridgeEngine – for now just return no bridges
-                low_bridges_raw = []
+            # 2) Bridge check using BridgeEngine.check_leg
+            check = bridge_engine.check_leg(
+                start_lat=start_lat,
+                start_lon=start_lon,
+                end_lat=end_lat,
+                end_lon=end_lon,
+                vehicle_height_m=req.vehicle_height_m,
+            )
 
             low_bridges: List[Dict[str, Any]] = []
-            for b in low_bridges_raw:
+
+            # If there is any conflict OR near-height issue and we have a nearest bridge,
+            # surface it as a single "low bridge" in the leg output.
+            if (check.has_conflict or check.near_height_limit) and check.nearest_bridge:
+                b = check.nearest_bridge
+                dist = check.nearest_distance_m or 0.0
                 low_bridges.append(
                     {
-                        "name": b.get("name"),
-                        "bridge_height_m": float(b.get("bridge_height_m")),
-                        "distance_from_start_m": float(
-                            b.get("distance_from_start_m", 0.0)
-                        ),
-                        "lat": float(b.get("lat")),
-                        "lon": float(b.get("lon")),
+                        "name": None,
+                        "bridge_height_m": float(b.height_m),
+                        "distance_from_start_m": float(dist),
+                        "lat": float(b.lat),
+                        "lon": float(b.lon),
                     }
                 )
 
