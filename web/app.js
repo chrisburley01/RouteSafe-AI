@@ -1,245 +1,183 @@
-// ============================
-// RouteSafe AI – app.js
-// ============================
+// =============================
+// CONFIG
+// =============================
 
-// LIVE backend URL (Render)
-const API_BASE_URL = "https://routesafe-ai.onrender.com";
+// Your FastAPI backend on Render
+// Change this if your URL is different
+const BACKEND_BASE = "https://routesafe-ai.onrender.com";
 
-// ----- DOM references -----
-const form = document.getElementById("route-form");
-const statusEl = document.getElementById("status");
-const resultsCard = document.getElementById("results-card");
-const legsListEl = document.getElementById("legs-list");
-const summaryEl = document.getElementById("summary");
-const planPhotoInput = document.getElementById("plan-photo");
-const stopsTextarea = document.getElementById("stops");
-const depotInput = document.getElementById("depot-postcode");
-const heightInput = document.getElementById("vehicle-height");
+// Convenience: grab elements once
+const form = document.getElementById("routeForm");
+const depotInput = document.getElementById("depotPostcode");
+const stopsInput = document.getElementById("stopsTextarea");   // one stop per line
+const heightInput = document.getElementById("vehicleHeight");  // metres
+const routeSummary = document.getElementById("routeSummary");
+const routeLegs = document.getElementById("routeLegs");
+const errorBox = document.getElementById("errorBox");
+const debugBox = document.getElementById("debugBox");          // optional
 
-// ---------- helpers ---------- //
+// =============================
+// Helpers
+// =============================
 
-function setStatus(message, type = "info") {
-  statusEl.textContent = message || "";
-  statusEl.classList.remove("rs-info", "rs-error", "rs-success");
+function setLoading(isLoading) {
+  const btn = document.getElementById("generateBtn");
+  if (!btn) return;
 
-  if (type === "error") {
-    statusEl.classList.add("rs-error");
-  } else if (type === "success") {
-    statusEl.classList.add("rs-success");
+  if (isLoading) {
+    btn.disabled = true;
+    btn.textContent = "Calculating...";
   } else {
-    statusEl.classList.add("rs-info");
+    btn.disabled = false;
+    btn.textContent = "Generate safe legs";
   }
 }
 
-function clearResults() {
-  resultsCard.classList.add("hidden");
-  resultsCard.classList.remove("rs-safe", "rs-warning", "rs-unsafe");
-  legsListEl.innerHTML = "";
-  summaryEl.textContent = "";
+function showError(message) {
+  if (errorBox) {
+    errorBox.textContent = message;
+    errorBox.style.display = "block";
+  } else {
+    alert(message);
+  }
 }
 
-function normaliseStops(rawText) {
-  return rawText
-    .split(/\r?\n/)
+function clearError() {
+  if (errorBox) {
+    errorBox.textContent = "";
+    errorBox.style.display = "none";
+  }
+}
+
+function logDebug(message, data = null) {
+  console.log("[RouteSafe debug]", message, data || "");
+  if (debugBox) {
+    const line = document.createElement("div");
+    line.textContent =
+      `[${new Date().toLocaleTimeString()}] ${message}` +
+      (data ? ` :: ${JSON.stringify(data).slice(0, 400)}` : "");
+    debugBox.appendChild(line);
+  }
+}
+
+function parseStops(raw) {
+  return raw
+    .split(/\r?\n|,/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 }
 
-// Decide overall severity from legs
-function getRouteSeverity(legs) {
-  let hasConflict = false;
-  let nearLimit = false;
+// =============================
+// Rendering
+// =============================
 
-  (legs || []).forEach((leg) => {
-    if (leg.has_conflict || leg.safe === false) {
-      hasConflict = true;
-    } else if (leg.near_height_limit) {
-      nearLimit = true;
-    }
-  });
+function renderResults(data, depotPostcode, stops) {
+  routeLegs.innerHTML = "";
 
-  if (hasConflict) return "unsafe";
-  if (nearLimit) return "warning";
-  return "safe";
-}
-
-// Render the plan that comes back from the API
-function renderPlan(data) {
-  if (!data) {
-    clearResults();
-    setStatus("No data returned from server.", "error");
-    return;
-  }
-
-  const legs = data.legs || [];
   const vehicleHeight = data.vehicle_height_m;
-  const totalKm = data.total_distance_km;
-  const totalMin = data.total_duration_min;
 
   // Summary line
-  let summaryParts = [];
-  if (typeof totalKm === "number") {
-    summaryParts.push(`Total: ${totalKm.toFixed(1)} km`);
-  }
-  if (typeof totalMin === "number") {
-    summaryParts.push(`approx ${totalMin.toFixed(0)} mins`);
-  }
-  if (typeof vehicleHeight === "number") {
-    summaryParts.push(`vehicle height ${vehicleHeight.toFixed(2)} m`);
+  const totalLegs = data.legs.length;
+  const totalText = `Route calculated • ${totalLegs} leg${
+    totalLegs === 1 ? "" : "s"
+  } • vehicle height ${vehicleHeight.toFixed(2)} m`;
+
+  if (routeSummary) {
+    routeSummary.textContent = totalText;
   }
 
-  summaryEl.textContent = summaryParts.join(" • ");
+  // Build each leg card
+  data.legs.forEach((leg, index) => {
+    const card = document.createElement("div");
+    card.className = "route-leg-card";
 
-  // Clear any old legs
-  legsListEl.innerHTML = "";
+    const legTitle = document.createElement("h3");
+    const fromLabel = index === 0 ? depotPostcode : stops[index - 1];
+    const toLabel = stops[index];
+    legTitle.textContent = `Leg ${index + 1}: ${fromLabel} → ${toLabel}`;
+    card.appendChild(legTitle);
 
-  // Build each leg
-  legs.forEach((leg, index) => {
-    const item = document.createElement("div");
-    item.className = "leg-item";
+    // Warnings section
+    const warnings = leg.warnings || [];
+    const warnP = document.createElement("p");
 
-    const fromLabel = leg.from_ || leg.from || `Leg ${index + 1} start`;
-    const toLabel = leg.to || `Leg ${index + 1} end`;
-
-    // Determine leg safety
-    const bridge = leg.bridge || null;
-    const hasConflict =
-      leg.has_conflict ||
-      leg.safe === false ||
-      (bridge && typeof bridge.clearance_m === "number" && bridge.clearance_m <= 0);
-
-    const nearLimit =
-      !hasConflict &&
-      (leg.near_height_limit ||
-        (bridge &&
-          typeof bridge.clearance_m === "number" &&
-          bridge.clearance_m > 0 &&
-          bridge.clearance_m <= 0.25)); // 25 cm buffer
-
-    let statusText = "";
-    let statusClass = "";
-
-    if (hasConflict) {
-      const h =
-        bridge && typeof bridge.height_m === "number"
-          ? `${bridge.height_m.toFixed(2)} m`
-          : "unknown height";
-      const clr =
-        bridge && typeof bridge.clearance_m === "number"
-          ? `${bridge.clearance_m.toFixed(2)} m clearance`
-          : "";
-      statusText = `LOW BRIDGE – UNSAFE ❌  (bridge ${h}${clr ? ", " + clr : ""})`;
-      statusClass = "leg-status-unsafe";
-    } else if (nearLimit) {
-      const h =
-        bridge && typeof bridge.height_m === "number"
-          ? `${bridge.height_m.toFixed(2)} m`
-          : "near your vehicle height";
-      statusText = `Near height limit ⚠️  (bridge ${h})`;
-      statusClass = "leg-status-warning";
+    if (warnings.length === 0) {
+      warnP.textContent = "No low bridges detected on this leg.";
+      warnP.className = "safe-text";
     } else {
-      statusText = "No low bridges detected ✓";
-      statusClass = "leg-status-safe";
+      warnP.innerHTML = `<strong>Warning:</strong> ${warnings.length} possible low bridge(s) near this route.`;
+      warnP.className = "warn-text";
+
+      const list = document.createElement("ul");
+      warnings.forEach((w) => {
+        const li = document.createElement("li");
+        li.textContent = `Bridge ${w.bridge_height_m.toFixed(
+          2
+        )} m at approx ${w.bridge_lat.toFixed(5)}, ${w.bridge_lon.toFixed(
+          5
+        )} (≈${w.distance_km.toFixed(2)} km from path)`;
+        list.appendChild(li);
+      });
+      card.appendChild(list);
+    }
+    card.appendChild(warnP);
+
+    // Google Maps link
+    if (leg.maps_link) {
+      const link = document.createElement("a");
+      link.href = leg.maps_link;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "Open this leg in Google Maps";
+      link.className = "maps-link";
+      card.appendChild(link);
     }
 
-    // Google Maps link (we just use the labels; Google is good at guessing)
-    const gmUrl =
-      "https://www.google.com/maps/dir/" +
-      encodeURIComponent(fromLabel) +
-      "/" +
-      encodeURIComponent(toLabel);
-
-    item.innerHTML = `
-      <div class="leg-header">
-        <div class="leg-title">
-          <strong>${fromLabel}</strong> → <strong>${toLabel}</strong>
-        </div>
-        <div class="leg-meta">
-          ${
-            typeof leg.distance_km === "number"
-              ? `${leg.distance_km.toFixed(1)} km`
-              : ""
-          }
-          ${
-            typeof leg.duration_min === "number"
-              ? ` · approx ${leg.duration_min.toFixed(0)} mins`
-              : ""
-          }
-        </div>
-      </div>
-      <div class="leg-status ${statusClass}">
-        ${statusText}
-      </div>
-      <div class="leg-links">
-        <a href="${gmUrl}" target="_blank" rel="noopener noreferrer">
-          Open this leg in Google Maps
-        </a>
-      </div>
-    `;
-
-    legsListEl.appendChild(item);
+    routeLegs.appendChild(card);
   });
-
-  // Overall route badge on the card
-  const severity = getRouteSeverity(legs);
-  resultsCard.classList.remove("hidden", "rs-safe", "rs-warning", "rs-unsafe");
-
-  if (severity === "unsafe") {
-    resultsCard.classList.add("rs-unsafe");
-    setStatus(
-      "Route calculated, but at least one leg passes a LOW BRIDGE. Check red cards carefully.",
-      "error"
-    );
-  } else if (severity === "warning") {
-    resultsCard.classList.add("rs-warning");
-    setStatus(
-      "Route calculated. Some legs are close to your height limit – check amber cards.",
-      "info"
-    );
-  } else {
-    resultsCard.classList.add("rs-safe");
-    setStatus(
-      "Route calculated. Distances/times are rough until an HGV router is used, but bridge checks are live.",
-      "success"
-    );
-  }
 }
 
-// ---------- form submit handler ---------- //
+// =============================
+// Form handler
+// =============================
 
-form.addEventListener("submit", async (evt) => {
-  evt.preventDefault();
-  clearResults();
+async function handleSubmit(event) {
+  event.preventDefault();
+  clearError();
+  logDebug("Submitting route form");
 
-  const depot = depotInput.value.trim();
-  const stops = normaliseStops(stopsTextarea.value || "");
-  const vehicleHeightStr = (heightInput.value || "").trim();
-  const vehicleHeight = vehicleHeightStr ? parseFloat(vehicleHeightStr) : null;
+  const depotPostcode = depotInput.value.trim();
+  const rawStops = stopsInput.value.trim();
+  const vehicleHeight = parseFloat(heightInput.value);
 
-  if (!depot) {
-    setStatus("Please enter a depot postcode.", "error");
-    return;
-  }
-  if (!stops.length) {
-    setStatus("Please enter at least one stop postcode.", "error");
-    return;
-  }
-  if (!vehicleHeight || isNaN(vehicleHeight)) {
-    setStatus("Please enter your vehicle height in metres.", "error");
+  if (!depotPostcode) {
+    showError("Please enter a depot postcode.");
     return;
   }
 
-  // Currently we only use typed data; photo upload BETA can be wired later
+  const stops = parseStops(rawStops);
+  if (stops.length === 0) {
+    showError("Please enter at least one stop postcode.");
+    return;
+  }
+
+  if (!vehicleHeight || vehicleHeight <= 0) {
+    showError("Please enter a valid vehicle height in metres.");
+    return;
+  }
+
   const payload = {
-    depot_postcode: depot,
+    start: depotPostcode,
     stops: stops,
     vehicle_height_m: vehicleHeight,
   };
 
-  setStatus("Calculating bridge-safe legs…", "info");
+  logDebug("Payload to backend", payload);
+
+  setLoading(true);
 
   try {
-    const response = await fetch(`${API_BASE_URL}/plan`, {
+    const response = await fetch(`${BACKEND_BASE}/route`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -249,26 +187,35 @@ form.addEventListener("submit", async (evt) => {
 
     if (!response.ok) {
       const text = await response.text();
-      console.error("Backend error:", response.status, text);
-      setStatus(
-        `Server error (${response.status}). Please try again in a moment.`,
-        "error"
+      logDebug("Backend error response", text);
+      throw new Error(
+        `Backend error (${response.status}): ${
+          text || "Unexpected problem contacting RouteSafe backend."
+        }`
       );
-      return;
     }
 
     const data = await response.json();
-    renderPlan(data);
+    logDebug("Backend JSON received", data);
+
+    renderResults(data, depotPostcode, stops);
   } catch (err) {
-    console.error("Request failed:", err);
-    setStatus(
-      "Could not reach the RouteSafe server. Check your signal and try again.",
-      "error"
-    );
+    console.error(err);
+    showError(err.message || "Something went wrong generating the route.");
+  } finally {
+    setLoading(false);
   }
-});
+}
 
-// ---------- initial ---------- //
+// =============================
+// Wire up
+// =============================
 
-setStatus("Enter your route and vehicle height, then tap “Generate safe legs”.", "info");
-clearResults();
+if (form) {
+  form.addEventListener("submit", handleSubmit);
+  logDebug("routeForm listener attached");
+} else {
+  console.warn(
+    "RouteSafe: No form with id 'routeForm' found – check your HTML IDs."
+  );
+}
