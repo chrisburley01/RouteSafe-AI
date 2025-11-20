@@ -11,11 +11,11 @@
       --bg: #f3f4f6;
       --card-bg: #ffffff;
       --border: #d1d5db;
+      --muted: #6b7280;
       --danger-bg: #fee2e2;
       --danger-text: #b91c1c;
-      --muted: #6b7280;
-      --radius-lg: 12px;
-      --shadow-card: 0 10px 25px rgba(15, 35, 83, 0.08);
+      --radius-lg: 16px;
+      --shadow-card: 0 14px 35px rgba(15, 35, 83, 0.14);
     }
 
     * {
@@ -31,42 +31,74 @@
       color: #111827;
     }
 
-    .page {
+    .hero {
+      background: radial-gradient(circle at top left, #1d4ed8, #020617);
+      color: #e5e7eb;
+      padding: 1.5rem 1rem 1.75rem;
+    }
+
+    .hero-inner {
       max-width: 1100px;
       margin: 0 auto;
-      padding: 1.5rem 1rem 3rem;
     }
 
-    header {
-      margin-bottom: 1.5rem;
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.5rem;
     }
 
-    header h1 {
-      font-size: 1.75rem;
+    .brand-logo {
+      width: 32px;
+      height: 32px;
+      border-radius: 10px;
+      background: #16a34a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+    }
+
+    .brand-title {
+      font-size: 1.2rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    .hero h1 {
       margin: 0;
-      color: var(--primary-dark);
+      font-size: 1.9rem;
+      letter-spacing: 0.01em;
     }
 
-    header p {
-      margin: 0.25rem 0 0;
-      color: var(--muted);
-      font-size: 0.95rem;
+    .hero p {
+      margin: 0.4rem 0 0;
+      font-size: 0.93rem;
+      color: #cbd5f5;
+      max-width: 620px;
     }
 
     .version {
-      margin-top: 0.25rem;
+      margin-top: 0.4rem;
       font-size: 0.8rem;
-      color: var(--muted);
+      color: #9ca3af;
     }
 
-    .grid {
+    .page {
+      max-width: 1100px;
+      margin: -1.5rem auto 0;
+      padding: 0 1rem 2.5rem;
+    }
+
+    .layout {
       display: grid;
-      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr);
-      gap: 1rem;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.1fr);
+      gap: 1.2rem;
     }
 
-    @media (max-width: 800px) {
-      .grid {
+    @media (max-width: 900px) {
+      .layout {
         grid-template-columns: minmax(0, 1fr);
       }
     }
@@ -74,21 +106,25 @@
     .card {
       background: var(--card-bg);
       border-radius: var(--radius-lg);
-      padding: 1rem 1.1rem 1.2rem;
+      padding: 1.2rem 1.3rem 1.4rem;
       box-shadow: var(--shadow-card);
-      border: 1px solid rgba(15, 35, 83, 0.04);
+      border: 1px solid rgba(15, 35, 83, 0.06);
     }
 
     .card h2 {
-      margin: 0 0 0.4rem;
-      font-size: 1.15rem;
+      margin: 0 0 0.25rem;
+      font-size: 1.1rem;
       color: var(--primary-dark);
     }
 
     .card-subtitle {
-      margin: 0 0 1rem;
+      margin: 0 0 0.9rem;
       font-size: 0.85rem;
       color: var(--muted);
+    }
+
+    .field {
+      margin-bottom: 0.8rem;
     }
 
     label {
@@ -103,83 +139,82 @@
     input[type="number"],
     textarea {
       width: 100%;
-      padding: 0.55rem 0.6rem;
-      border-radius: 8px;
+      padding: 0.6rem 0.65rem;
+      border-radius: 10px;
       border: 1px solid var(--border);
       font-size: 0.9rem;
       outline: none;
       transition: border-color 0.15s, box-shadow 0.15s;
+      background: #f9fafb;
     }
 
     input[type="text"]:focus,
     input[type="number"]:focus,
     textarea:focus {
       border-color: var(--primary);
-      box-shadow: 0 0 0 1px rgba(0, 44, 119, 0.2);
+      box-shadow: 0 0 0 1px rgba(0, 44, 119, 0.25);
+      background: #ffffff;
     }
 
     textarea {
-      min-height: 120px;
+      min-height: 130px;
       resize: vertical;
       white-space: pre;
     }
 
     .hint {
-      font-size: 0.8rem;
+      font-size: 0.78rem;
       color: var(--muted);
       margin-top: 0.25rem;
-    }
-
-    .field {
-      margin-bottom: 0.8rem;
     }
 
     .btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 0.4rem;
-      padding: 0.55rem 1.1rem;
+      gap: 0.35rem;
+      padding: 0.65rem 1.35rem;
       border-radius: 999px;
       border: none;
-      background: var(--primary);
+      background: #00b894;
       color: #ffffff;
       font-size: 0.9rem;
       font-weight: 600;
       cursor: pointer;
-      box-shadow: 0 8px 18px rgba(0, 44, 119, 0.25);
+      box-shadow: 0 10px 24px rgba(0, 184, 148, 0.35);
       transition: transform 0.08s ease, box-shadow 0.08s ease,
-        background 0.1s ease;
+        background 0.12s ease;
+      margin-top: 0.3rem;
     }
 
     .btn:hover {
-      background: #003894;
-      box-shadow: 0 10px 22px rgba(0, 44, 119, 0.3);
+      background: #02a184;
+      box-shadow: 0 12px 26px rgba(0, 184, 148, 0.4);
       transform: translateY(-1px);
     }
 
     .btn:active {
       transform: translateY(0);
-      box-shadow: 0 6px 14px rgba(0, 44, 119, 0.2);
+      box-shadow: 0 8px 18px rgba(0, 184, 148, 0.3);
     }
 
     .btn[disabled] {
-      opacity: 0.7;
+      opacity: 0.65;
       cursor: default;
-      box-shadow: none;
       transform: none;
+      box-shadow: none;
     }
 
     .status {
       margin-top: 0.7rem;
-      font-size: 0.85rem;
+      font-size: 0.83rem;
     }
 
     .status-error {
       background: var(--danger-bg);
       color: var(--danger-text);
       border-radius: 10px;
-      padding: 0.7rem 0.8rem;
+      padding: 0.65rem 0.75rem;
     }
 
     .status-ok {
@@ -195,37 +230,37 @@
       font-size: 0.86rem;
     }
 
-    .leg-item {
-      padding: 0.55rem 0.35rem;
-      border-radius: 8px;
+    .leg {
+      border-radius: 10px;
       border: 1px solid #e5e7eb;
-      margin-bottom: 0.4rem;
+      padding: 0.6rem 0.65rem 0.55rem;
+      margin-bottom: 0.5rem;
       background: #f9fafb;
+    }
+
+    .leg-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.25rem;
     }
 
     .leg-title {
       font-weight: 600;
-      margin-bottom: 0.15rem;
       color: #111827;
-    }
-
-    .leg-meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.35rem 0.7rem;
-      font-size: 0.78rem;
-      color: #4b5563;
+      font-size: 0.9rem;
     }
 
     .pill {
       display: inline-flex;
       align-items: center;
-      padding: 0.05rem 0.5rem;
+      padding: 0.05rem 0.55rem;
       border-radius: 999px;
       font-size: 0.7rem;
       font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.02em;
+      letter-spacing: 0.04em;
     }
 
     .pill-safe {
@@ -233,33 +268,59 @@
       color: #047857;
     }
 
-    .pill-warning {
+    .pill-risk {
       background: #fef3c7;
       color: #92400e;
     }
 
+    .leg-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem 0.8rem;
+      font-size: 0.78rem;
+      color: #4b5563;
+      margin-bottom: 0.25rem;
+    }
+
+    .bridges-summary {
+      font-size: 0.78rem;
+      color: #4b5563;
+    }
+
+    .bridges-summary strong {
+      font-weight: 600;
+    }
+
     footer {
-      margin-top: 1.3rem;
+      margin-top: 1.1rem;
       font-size: 0.78rem;
       color: var(--muted);
-      text-align: left;
     }
   </style>
 </head>
 <body>
-  <div class="page">
-    <header>
-      <h1>RouteSafe AI</h1>
-      <p>Prototype · Check HGV routes against low bridges.</p>
-      <div class="version">Prototype v0.1</div>
-    </header>
+  <div class="hero">
+    <div class="hero-inner">
+      <div class="brand-row">
+        <div class="brand-logo">🛣️</div>
+        <div class="brand-title">RouteSafe AI</div>
+      </div>
+      <h1>Build a safe HGV route</h1>
+      <p>
+        Keep your existing drop order &mdash; RouteSafe AI will check each leg for low bridges
+        using ORS directions and a UK bridge database.
+      </p>
+      <div class="version">Prototype v0.1 &middot; Internal use only</div>
+    </div>
+  </div>
 
-    <div class="grid">
+  <div class="page">
+    <div class="layout">
       <!-- LEFT: form -->
       <div class="card">
         <h2>Route details</h2>
         <p class="card-subtitle">
-          Enter your depot, vehicle height and delivery postcodes in order.
+          Enter your depot, trailer height and delivery postcodes in order.
         </p>
 
         <form id="route-form">
@@ -296,7 +357,7 @@
               placeholder="One postcode per line&#10;HD5 0RL&#10;LS1 1AA"
             >Hd5 0rl</textarea>
             <div class="hint">
-              One stop per line. Keep the order you want to deliver.
+              One postcode per line. Keep the drop order you want to run.
             </div>
           </div>
 
@@ -312,8 +373,8 @@
       <div class="card">
         <h2>Route legs</h2>
         <p class="card-subtitle">
-          Each leg is calculated in your order. Distance / time are approximate
-          until the full HGV router is wired in.
+          Each leg is calculated in order. Distance / time are approximate until
+          the full HGV router is wired in.
         </p>
 
         <div id="legs-container" class="legs-list">
@@ -326,15 +387,13 @@
     </div>
 
     <footer>
-      RouteSafe AI prototype · Internal use only · ORS directions with low
-      bridge overlay (beta).
+      Data source: OpenRouteService directions + internal low bridge dataset (beta).
     </footer>
   </div>
 
   <script>
-    // TODO: set this to your real backend endpoint:
-    // e.g. 'https://your-app.onrender.com/api/route'
-    const BACKEND_URL = 'https://YOUR-BACKEND-URL-HERE/api/route';
+    // Backend endpoint from Render
+    const BACKEND_URL = 'https://routesafe-ai.onrender.com/api/route';
 
     const form = document.getElementById('route-form');
     const statusEl = document.getElementById('status');
@@ -366,104 +425,41 @@
       legsContainer.innerHTML = '';
 
       legs.forEach((leg, idx) => {
-        const item = document.createElement('div');
-        item.className = 'leg-item';
+        const bridges = leg.low_bridges || [];
+        const hasRisk = bridges.length > 0;
+
+        let minBridgeText = 'n/a';
+        if (hasRisk) {
+          const minHeight = Math.min(
+            ...bridges.map((b) => Number(b.bridge_height_m) || 0)
+          );
+          minBridgeText = `${minHeight.toFixed(2)} m`;
+        }
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'leg';
+
+        const header = document.createElement('div');
+        header.className = 'leg-header';
 
         const title = document.createElement('div');
         title.className = 'leg-title';
-        title.textContent = `Leg ${idx + 1}: ${leg.from} → ${leg.to}`;
+        title.textContent = `Leg ${idx + 1}: ${leg.from_postcode} → ${leg.to_postcode}`;
+
+        const pill = document.createElement('span');
+        pill.className = 'pill ' + (hasRisk ? 'pill-risk' : 'pill-safe');
+        pill.textContent = hasRisk ? 'LOW BRIDGE(S)' : 'HGV SAFE';
+
+        header.appendChild(title);
+        header.appendChild(pill);
 
         const meta = document.createElement('div');
         meta.className = 'leg-meta';
-
-        const dist = document.createElement('span');
-        dist.textContent = `Distance: ${leg.distance_km?.toFixed
-          ? leg.distance_km.toFixed(1)
-          : leg.distance_km || '?'
-          } km`;
-
-        const time = document.createElement('span');
-        time.textContent = `Time: ${leg.duration_min?.toFixed
-          ? leg.duration_min.toFixed(0)
-          : leg.duration_min || '?'
-          } min`;
-
-        const height = document.createElement('span');
-        height.textContent = `Min bridge: ${leg.min_bridge_m ?? '?'} m`;
-
-        const pill = document.createElement('span');
-        pill.className =
-          'pill ' + (leg.hgv_safe ? 'pill-safe' : 'pill-warning');
-        pill.textContent = leg.hgv_safe ? 'HGV SAFE' : 'CHECK HEIGHT';
-
-        meta.appendChild(dist);
-        meta.appendChild(time);
-        meta.appendChild(height);
-        meta.appendChild(pill);
-
-        item.appendChild(title);
-        item.appendChild(meta);
-        legsContainer.appendChild(item);
-      });
-    }
-
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-
-      const depot = document.getElementById('depot').value.trim();
-      const height = parseFloat(
-        document.getElementById('height').value.trim() || '0'
-      );
-      const stopsRaw = document.getElementById('stops').value;
-
-      const deliveryPostcodes = stopsRaw
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .filter((l) => l.length > 0);
-
-      if (!depot || !deliveryPostcodes.length) {
-        setStatus(
-          'Please enter a depot postcode and at least one delivery postcode.',
-          'error'
-        );
-        return;
-      }
-
-      setStatus('Contacting backend…');
-      generateBtn.disabled = true;
-
-      try {
-        const response = await fetch(BACKEND_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            depot_postcode: depot,
-            vehicle_height_m: height,
-            delivery_postcodes: deliveryPostcodes,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error('Backend returned ' + response.status);
-        }
-
-        const data = await response.json();
-        renderLegs(data.legs || data); // supports either {legs: []} or [] directly
-        setStatus('Route generated successfully.');
-      } catch (err) {
-        console.error(err);
-        setStatus(
-          'Failed to contact backend. Please check the backend URL and CORS settings.',
-          'error'
-        );
-        legsContainer.innerHTML =
-          '<div class="hint">No results – backend could not be reached.</div>';
-      } finally {
-        generateBtn.disabled = false;
-      }
-    });
-  </script>
-</body>
-</html>
+        meta.innerHTML = `
+          <span>Distance: ${leg.distance_km?.toFixed
+            ? leg.distance_km.toFixed(2)
+            : leg.distance_km
+          } km</span>
+          <span>Time: ${leg.duration_min?.toFixed
+            ? leg.duration_min.toFixed(0)
+            : leg.duration
