@@ -16,8 +16,7 @@ from bridge_engine import BridgeEngine
 ORS_API_KEY = os.getenv("ORS_API_KEY")
 
 if not ORS_API_KEY:
-    # We keep this check here – but the error the user will see comes
-    # from inside the route handler so Render still starts the app.
+    # Still warn in logs, but let the app start
     print("WARNING: ORS_API_KEY environment variable is not set.")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -33,15 +32,11 @@ bridge_engine = BridgeEngine(BRIDGE_CSV_PATH)
 
 app = FastAPI(title="RouteSafe AI Backend", version="0.1")
 
-# CORS: allow GitHub Pages frontend + local dev
+# CORS: for prototype, allow everything (no cookies)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://chrisburley01.github.io",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-    ],
-    allow_credentials=False,  # no cookies / auth needed for this prototype
+    allow_origins=["*"],       # wide open for now
+    allow_credentials=False,   # MUST be false if origin="*"
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -196,9 +191,6 @@ def get_hgv_route_metrics(
     Call ORS driving-hgv directions and return total distance (km) and
     duration (minutes). If the HGV profile is not available, we fall
     back to driving-car.
-
-    If ORS responds with an error or unexpected JSON, we raise an
-    HTTPException with the real ORS message so it shows up in the UI.
     """
 
     if not ORS_API_KEY:
