@@ -2,79 +2,77 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>RouteSafe AI – prototype v0.1</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RouteSafe AI – Prototype</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <main class="page">
-    <header class="header">
+  <div class="page">
+    <header class="page-header">
       <h1>RouteSafe AI</h1>
-      <p class="tagline">Prototype – check HGV routes against low bridges</p>
+      <p class="subtitle">Prototype · Check HGV routes against low bridges</p>
     </header>
 
-    <section class="card">
-      <h2>Route details</h2>
+    <main class="layout">
+      <!-- Left card: inputs -->
+      <section class="card card-inputs">
+        <h2>Route details</h2>
 
-      <div class="field">
-        <label for="depot">Depot postcode</label>
-        <input id="depot" type="text" placeholder="LS27 0BN" />
-      </div>
-
-      <div class="field">
-        <label for="stops">
-          Delivery postcodes
-          <span class="hint">(one per line)</span>
-        </label>
-        <textarea id="stops" rows="5" placeholder="HG1 3DT&#10;HD5 0RL"></textarea>
-      </div>
-
-      <div class="field inline">
-        <div>
-          <label for="vehicleHeight">Vehicle height (m)</label>
-          <input
-            id="vehicleHeight"
-            type="number"
-            step="0.05"
-            min="2.0"
-            max="6.5"
-            value="4.0"
-          />
+        <div class="form-group">
+          <label for="depot-postcode">Depot postcode</label>
+          <input id="depot-postcode" type="text" placeholder="LS27 0BN" />
         </div>
-      </div>
 
-      <div class="field">
-        <label for="planFile">
-          Photo of your printed plan <span class="hint">(BETA – optional)</span>
-        </label>
-        <input id="planFile" type="file" accept="image/*" />
+        <div class="form-group">
+          <label for="stops">Delivery postcodes <span class="hint">(one per line)</span></label>
+          <textarea
+            id="stops"
+            rows="5"
+            placeholder="HD5 0RL&#10;HG1 3DT"
+          ></textarea>
+        </div>
+
+        <div class="form-group form-inline">
+          <div>
+            <label for="vehicle-height">Vehicle height (m)</label>
+            <input id="vehicle-height" type="number" step="0.1" value="4.0" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="plan-file">
+            Photo of your printed plan <span class="beta-tag">BETA</span>
+            <span class="hint">(optional – not wired up in this clean version)</span>
+          </label>
+          <input id="plan-file" type="file" disabled />
+        </div>
+
+        <button id="generate-btn" class="btn-primary">
+          Generate safe legs
+        </button>
+
+        <div id="error-box" class="error-box" hidden></div>
+      </section>
+
+      <!-- Right card: results -->
+      <section class="card card-results">
+        <h2>Route legs</h2>
         <p class="hint">
-          Optional – not wired up yet in this clean version.
-          Core bridge checks work from the postcodes above.
+          Each leg is calculated in your order. Distance / time are approximate
+          until we plug in the full HGV router.
         </p>
-      </div>
+        <div id="route-legs" class="legs-container">
+          <p class="placeholder">
+            Enter your route on the left and click
+            <strong>Generate safe legs</strong> to see results here.
+          </p>
+        </div>
+      </section>
+    </main>
 
-      <button id="generateBtn" class="primary-btn">
-        Generate safe legs
-      </button>
-
-      <p id="status" class="status"></p>
-    </section>
-
-    <section class="card">
-      <h2>Route legs</h2>
-      <p class="hint">
-        Each leg is calculated in your order. Distance/time are approximate
-        until we plug in the HGV router.
-      </p>
-
-      <div id="legsContainer" class="legs-container"></div>
-    </section>
-
-    <footer class="footer">
+    <footer class="page-footer">
       <span>RouteSafe AI · prototype v0.1</span>
     </footer>
-  </main>
+  </div>
 
   <script src="app.js"></script>
 </body>
