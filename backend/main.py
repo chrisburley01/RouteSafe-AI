@@ -29,7 +29,6 @@ bridge_engine = BridgeEngine(BRIDGE_CSV_PATH)
 
 app = FastAPI(title="RouteSafe AI Backend", version="0.1")
 
-# Leave CORS open in case we ever serve from another domain again
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -70,7 +69,7 @@ class RouteResponse(BaseModel):
 
 
 # -------------------------------------------------------------------
-# UI HTML served from backend (no CORS issues)
+# UI HTML (served by backend – no CORS issues)
 # -------------------------------------------------------------------
 
 HTML_PAGE = """
@@ -690,13 +689,18 @@ def api_route(req: RouteRequest):
                 end_lat=end_lat,
             )
 
-            low_bridges_raw = bridge_engine.find_low_bridges_for_leg(
-                start_lat=start_lat,
-                start_lon=start_lon,
-                end_lat=end_lat,
-                end_lon=end_lon,
-                vehicle_height_m=req.vehicle_height_m,
-            )
+            # ---- LOW BRIDGE LOOKUP (robust to older BridgeEngine versions) ----
+            if hasattr(bridge_engine, "find_low_bridges_for_leg"):
+                low_bridges_raw = bridge_engine.find_low_bridges_for_leg(
+                    start_lat=start_lat,
+                    start_lon=start_lon,
+                    end_lat=end_lat,
+                    end_lon=end_lon,
+                    vehicle_height_m=req.vehicle_height_m,
+                )
+            else:
+                # Older / simpler BridgeEngine – for now just return no bridges
+                low_bridges_raw = []
 
             low_bridges: List[Dict[str, Any]] = []
             for b in low_bridges_raw:
@@ -725,10 +729,8 @@ def api_route(req: RouteRequest):
         return {"legs": legs_out}
 
     except HTTPException:
-        # Let FastAPI handle these normally
         raise
     except Exception as e:
-        # Catch any unexpected error so we see the message in the UI
         raise HTTPException(
             status_code=500,
             detail=f"Unexpected server error: {e}",
