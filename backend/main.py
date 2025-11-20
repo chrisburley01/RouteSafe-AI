@@ -52,8 +52,6 @@ class RouteRequest(BaseModel):
     vehicle_height_m: float
 
 
-# Optional: shape of each low bridge (we just return dicts, but this is
-# handy for type hints / docs).
 class BridgeOut(BaseModel):
     name: str | None = None
     bridge_height_m: float
@@ -143,8 +141,45 @@ def geocode_postcode(postcode: str) -> Tuple[float, float]:
 
 
 # -------------------------------------------------------------------
-# Helper: ORS routing (UPDATED as requested)
+# Helper: ORS routing (UPDATED)
 # -------------------------------------------------------------------
+
+def _extract_summary_from_ors(data: Dict[str, Any], raw_text: str) -> Dict[str, float]:
+    """
+    ORS can return either:
+      - JSON:    { "routes": [ { "summary": {...} } ] }
+      - GeoJSON: { "features": [ { "properties": { "summary": {...} } } ] }
+
+    This helper normalises both into {distance_km, duration_min}.
+    """
+    summary: Dict[str, Any] | None = None
+
+    try:
+        if "routes" in data:
+            # Standard JSON format
+            summary = data["routes"][0]["summary"]
+        elif "features" in data:
+            # GeoJSON format
+            summary = data["features"][0]["properties"]["summary"]
+        else:
+            raise KeyError("Neither 'routes' nor 'features' present")
+    except (KeyError, IndexError, TypeError) as e:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Unexpected routing response from ORS: "
+                f"{e} | payload: {raw_text[:300]}"
+            ),
+        )
+
+    distance_km = float(summary["distance"]) / 1000.0
+    duration_min = float(summary["duration"]) / 60.0
+
+    return {
+        "distance_km": round(distance_km, 2),
+        "duration_min": round(duration_min, 1),
+    }
+
 
 def get_hgv_route_metrics(
     start_lon: float,
@@ -194,27 +229,11 @@ def get_hgv_route_metrics(
             )
             continue
 
+        raw_text = resp.text
         data: Dict[str, Any] = resp.json()
 
-        try:
-            summary = data["features"][0]["properties"]["summary"]
-        except (KeyError, IndexError, TypeError):
-            # ORS said OK but the JSON is not what we expect
-            raise HTTPException(
-                status_code=502,
-                detail=(
-                    f"Unexpected routing response from ORS "
-                    f"({profile_used}): {resp.text[:300]}"
-                ),
-            )
-
-        distance_km = summary["distance"] / 1000.0
-        duration_min = summary["duration"] / 60.0
-
-        return {
-            "distance_km": round(distance_km, 2),
-            "duration_min": round(duration_min, 1),
-        }
+        # Normalise JSON/GeoJSON via helper
+        return _extract_summary_from_ors(data, raw_text)
 
     # If both profiles failed:
     raise HTTPException(
