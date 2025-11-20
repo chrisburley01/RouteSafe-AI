@@ -1,7 +1,8 @@
 // ====== CONFIG ======
 const BACKEND_BASE = "https://routesafe-ai.onrender.com";
 
-// Helper: turn textarea into clean list of postcodes
+// ---------- helpers ----------
+
 function parsePostcodes(raw) {
   return raw
     .split(/\r?\n/)
@@ -9,38 +10,62 @@ function parsePostcodes(raw) {
     .filter(Boolean);
 }
 
-// Try /api/route first, fall back to /route if 404
+// Try /api/route first, then /route
 async function callRouteEndpoint(payload) {
   const tryPaths = ["/api/route", "/route"];
 
   for (const path of tryPaths) {
     const url = `${BACKEND_BASE}${path}`;
+
     const res = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
 
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+
     if (res.status === 404) {
-      // Try next path
+      // try next path
       continue;
     }
 
-    // Any other status: return as-is (may still be an error)
-    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(
-        `Backend ${res.status}: ${
-          data.detail || data.error || JSON.stringify(data)
-        }`
-      );
+      const detail = formatBackendError(data);
+      throw new Error(`Backend ${res.status}: ${detail}`);
     }
+
     return data;
   }
 
   throw new Error("Backend route not found at /api/route or /route");
+}
+
+function formatBackendError(data) {
+  if (!data) return "Unknown error";
+  if (typeof data === "string") return data;
+
+  // FastAPI validation error style: {"detail":[{loc:["body","field"],msg:"..."}]}
+  if (Array.isArray(data.detail)) {
+    return data.detail
+      .map((item) => {
+        if (typeof item.msg === "string") {
+          const loc = Array.isArray(item.loc) ? item.loc.join(".") : "";
+          return loc ? `${loc}: ${item.msg}` : item.msg;
+        }
+        return JSON.stringify(item);
+      })
+      .join("; ");
+  }
+
+  if (typeof data.detail === "string") return data.detail;
+
+  return JSON.stringify(data);
 }
 
 function renderLegs(container, result) {
@@ -55,6 +80,7 @@ function renderLegs(container, result) {
 
   const summary = document.createElement("p");
   summary.className = "summary";
+
   const totalKm =
     typeof result.total_distance_km === "number"
       ? result.total_distance_km.toFixed(1)
@@ -78,12 +104,14 @@ function renderLegs(container, result) {
 
     const meta = document.createElement("div");
     meta.className = "leg-meta";
-    const km = typeof leg.distance_km === "number"
-      ? `${leg.distance_km.toFixed(1)} km`
-      : "–";
-    const mins = typeof leg.time_mins === "number"
-      ? `${leg.time_mins.toFixed(0)} mins`
-      : "–";
+    const km =
+      typeof leg.distance_km === "number"
+        ? `${leg.distance_km.toFixed(1)} km`
+        : "–";
+    const mins =
+      typeof leg.time_mins === "number"
+        ? `${leg.time_mins.toFixed(0)} mins`
+        : "–";
     meta.textContent = `${km} · approx ${mins}`;
     card.appendChild(meta);
 
@@ -112,6 +140,8 @@ function renderLegs(container, result) {
     container.appendChild(card);
   });
 }
+
+// ---------- wire up UI ----------
 
 document.addEventListener("DOMContentLoaded", () => {
   const depotInput = document.getElementById("depot");
@@ -148,10 +178,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const allPostcodes = [depot, ...stops];
 
+    // Send lots of alias field names so whatever the current Pydantic model
+    // is using, it will find what it needs. Extra fields are ignored.
     const payload = {
       depot_postcode: depot,
+      depot,
+      origin: depot,
+
       postcodes: allPostcodes,
-      vehicle_height_m: height
+      all_postcodes: allPostcodes,
+
+      stops,
+      destinations: stops,
+
+      vehicle_height_m: height,
+      vehicleHeight: height,
+      vehicle_height: height,
     };
 
     generateBtn.disabled = true;
@@ -162,14 +204,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
     try {
       const result = await callRouteEndpoint(payload);
-      statusEl.textContent = "Route calculated. Distances/times rough until HGV router is plugged in, but bridge checks are live.";
+      statusEl.textContent =
+        "Route calculated. Distances/times rough until HGV router is plugged in, but bridge checks are live.";
       statusEl.classList.remove("status-error");
       statusEl.classList.add("status-success");
 
       renderLegs(legsContainer, result);
     } catch (err) {
       console.error(err);
-      statusEl.textContent = `Backend error: ${err.message}`;
+      statusEl.textContent = err.message;
       statusEl.classList.remove("status-info", "status-success");
       statusEl.classList.add("status-error");
     } finally {
