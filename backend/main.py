@@ -72,7 +72,7 @@ class RouteResponse(BaseModel):
 
 
 # -------------------------------------------------------------------
-# UI HTML (Leaflet mini-maps)
+# UI HTML (Leaflet map support)
 # -------------------------------------------------------------------
 
 HTML_PAGE = """
@@ -409,15 +409,10 @@ HTML_PAGE = """
     }
 
     function renderLegMap(geometry, mapId) {
-      // Expect geometry as [[lon, lat], ...]
-      if (!geometry || typeof L === "undefined") {
+      if (!geometry || !geometry.length || typeof L === "undefined") {
         return;
       }
-      if (!Array.isArray(geometry) || !Array.isArray(geometry[0])) {
-        // Not in expected format – leave the "no map data" hint visible
-        return;
-      }
-
+      // geometry is [[lon, lat], ...] – Leaflet wants [lat, lon]
       const latLngs = geometry.map(([lon, lat]) => [lat, lon]);
 
       const map = L.map(mapId, {
@@ -483,20 +478,21 @@ HTML_PAGE = """
         wrapper.appendChild(meta);
         wrapper.appendChild(bridgesSummary);
 
-        // Map container with default hint
+        // Map container
         const mapId = `leg-map-${idx}`;
         const mapDiv = document.createElement("div");
         mapDiv.className = "leg-map";
         mapDiv.id = mapId;
-        mapDiv.innerHTML =
-          '<div class="hint" style="padding:0.6rem;">No map data available for this leg.</div>';
         wrapper.appendChild(mapDiv);
 
         legsContainer.appendChild(wrapper);
 
-        // Try to draw map if we have usable geometry
-        if (leg.geometry) {
+        // draw map
+        if (leg.geometry && leg.geometry.length) {
           renderLegMap(leg.geometry, mapId);
+        } else {
+          mapDiv.innerHTML =
+            '<div class="hint" style="padding:0.6rem;">No map data available for this leg.</div>';
         }
       });
     }
@@ -618,30 +614,55 @@ def geocode_postcode(postcode: str) -> Tuple[float, float]:
     return float(lat), float(lon)
 
 
+# --- Polyline Decoder ---
+def decode_polyline(encoded: str) -> List[List[float]]:
+    """Decodes an encoded polyline from ORS into [[lon, lat], ...]."""
+    coords: List[List[float]] = []
+    index = lat = lon = 0
+    length = len(encoded)
+
+    while index < length:
+        result = 1
+        shift = 0
+        while True:
+            b = ord(encoded[index]) - 63 - 1
+            index += 1
+            result += b << shift
+            shift += 5
+            if b < 0x1f:
+                break
+        lat += ~(result >> 1) if (result & 1) else (result >> 1)
+
+        result = 1
+        shift = 0
+        while True:
+            b = ord(encoded[index]) - 63 - 1
+            index += 1
+            result += b << shift
+            shift += 5
+            if b < 0x1f:
+                break
+        lon += ~(result >> 1) if (result & 1) else (result >> 1)
+
+        coords.append([lon * 1e-5, lat * 1e-5])
+
+    return coords
+
+
 def _extract_summary_from_ors(data: Dict[str, Any], raw_text: str) -> Dict[str, Any]:
-    """Normalise ORS JSON/GeoJSON into distance_km + duration_min + geometry."""
-    summary: Dict[str, Any] | None = None
-    geometry_coords = None
+    """Normalise ORS JSON into distance_km, duration_min, geometry."""
     try:
         if "routes" in data:
             route0 = data["routes"][0]
             summary = route0["summary"]
             geom = route0.get("geometry")
-            if isinstance(geom, dict):
-                geometry_coords = geom.get("coordinates")
-            else:
-                geometry_coords = geom
-        elif "features" in data:
-            feat0 = data["features"][0]
-            summary = feat0["properties"]["summary"]
-            geom = feat0.get("geometry")
-            if isinstance(geom, dict):
-                geometry_coords = geom.get("coordinates")
+            if isinstance(geom, str):
+                geometry_coords = decode_polyline(geom)
             else:
                 geometry_coords = geom
         else:
-            raise KeyError("Neither 'routes' nor 'features' present")
-    except (KeyError, IndexError, TypeError) as e:
+            raise KeyError("No 'routes' in ORS response")
+    except Exception as e:
         raise HTTPException(
             status_code=502,
             detail=(
@@ -675,15 +696,12 @@ def get_hgv_route_metrics(
 
     def call_ors(profile: str):
         url = f"https://api.openrouteservice.org/v2/directions/{profile}"
-        headers = {
-            "Authorization": ORS_API_KEY,
-            "Content-Type": "application/json",
-        }
+        headers = {"Authorization": ORS_API_KEY}
         body = {
-            "coordinates": [[start_lon, start_lat], [end_lon, end_lat]],
-            # Ask ORS for full geometry in GeoJSON format if supported
-            "geometry": True,
-            "geometry_format": "geojson",
+            "coordinates": [
+                [start_lon, start_lat],
+                [end_lon, end_lat],
+            ],
             "instructions": False,
         }
         resp = requests.post(url, json=body, headers=headers, timeout=25)
