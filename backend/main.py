@@ -29,7 +29,7 @@ bridge_engine = BridgeEngine(BRIDGE_CSV_PATH)
 # FastAPI setup
 # -------------------------------------------------------------------
 
-app = FastAPI(title="RouteSafe AI Backend", version="0.4")
+app = FastAPI(title="RouteSafe AI Backend", version="0.5")
 
 app.add_middleware(
     CORSMiddleware,
@@ -64,11 +64,8 @@ class RouteLegOut(BaseModel):
     duration_min: float
     vehicle_height_m: float
     low_bridges: List[BridgeOut]
-    # main route geometry: [ [lon, lat], ... ]
     geometry: List[List[float]] | None = None
-    # whether this leg has *any* low bridges
     has_low_bridges: bool
-    # optional alternative route which tries to avoid low-bridge bubble
     alt_distance_km: float | None = None
     alt_duration_min: float | None = None
     alt_geometry: List[List[float]] | None = None
@@ -375,7 +372,7 @@ HTML_PAGE = """
       </div>
       <h1>Build a safe HGV route</h1>
       <p>Keep your drop order – RouteSafe AI checks each leg for low bridges using ORS + a UK bridge dataset.</p>
-      <div class="version">Prototype v0.4 | Internal Use Only</div>
+      <div class="version">Prototype v0.5 | Internal Use Only</div>
     </div>
   </div>
 
@@ -441,15 +438,14 @@ HTML_PAGE = """
     }
 
     function renderLegMap(geometry, mapId) {
+      const el = document.getElementById(mapId);
+      if (!el) return;
+
       if (!geometry || !geometry.length || typeof L === "undefined") {
-        const el = document.getElementById(mapId);
-        if (el) {
-          el.innerHTML =
-            '<div class="hint" style="padding:0.6rem;">No map data available for this leg.</div>';
-        }
+        el.innerHTML =
+          '<div class="hint" style="padding:0.6rem;">No map data available for this leg.</div>';
         return;
       }
-      // geometry is [[lon, lat], ...] – Leaflet wants [lat, lon]
       const latLngs = geometry.map(([lon, lat]) => [lat, lon]);
 
       const map = L.map(mapId, {
@@ -516,9 +512,7 @@ HTML_PAGE = """
         wrapper.appendChild(meta);
         wrapper.appendChild(bridgesSummary);
 
-        // --- Variants ---
         if (!risky || !leg.alt_geometry) {
-          // Just one variant – the main route
           const variant = document.createElement("div");
           variant.className = "route-variant " + (risky ? "variant-risk" : "variant-safe");
           variant.innerHTML = `
@@ -533,7 +527,6 @@ HTML_PAGE = """
           legsContainer.appendChild(wrapper);
           renderLegMap(leg.geometry, mapId);
         } else {
-          // Risky + Alternative
           const riskVariant = document.createElement("div");
           riskVariant.className = "route-variant variant-risk";
           riskVariant.innerHTML = `
@@ -686,7 +679,7 @@ def geocode_postcode(postcode: str) -> Tuple[float, float]:
     return float(lat), float(lon)
 
 
-# --- Polyline Decoder (correct Google-style) ---
+# --- Polyline Decoder ---
 def decode_polyline(encoded: str) -> List[List[float]]:
     """Decodes an encoded polyline string into [[lon, lat], ...]."""
     coords: List[List[float]] = []
@@ -802,7 +795,15 @@ def get_hgv_route_metrics(
 
         raw_text = resp.text
         data: Dict[str, Any] = resp.json()
-        return _extract_summary_from_ors(data, raw_text)
+        metrics = _extract_summary_from_ors(data, raw_text)
+
+        # Fallback geometry: straight line if ORS didn't give us one
+        if not metrics.get("geometry"):
+            metrics["geometry"] = [
+                [start_lon, start_lat],
+                [end_lon, end_lat],
+            ]
+        return metrics
 
     raise HTTPException(
         status_code=502,
@@ -827,7 +828,6 @@ def get_hgv_route_metrics_avoiding_bridge(
     if not ORS_API_KEY:
         return None
 
-    # Approximate meters → degrees
     dlat = buffer_m / 111320.0
     cos_lat = math.cos(math.radians(bridge_lat))
     if abs(cos_lat) < 1e-6:
@@ -865,13 +865,18 @@ def get_hgv_route_metrics_avoiding_bridge(
         raw_text = resp.text
         data: Dict[str, Any] = resp.json()
         try:
-            return _extract_summary_from_ors(data, raw_text)
+            metrics = _extract_summary_from_ors(data, raw_text)
         except HTTPException:
-            # If alt parsing fails, treat as no alternative
             last_error_txt = "parse error on alternative"
             continue
 
-    # If we reach here, no valid alternative
+        if not metrics.get("geometry"):
+            metrics["geometry"] = [
+                [start_lon, start_lat],
+                [end_lon, end_lat],
+            ]
+        return metrics
+
     print(f"[RouteSafe] No alternative route found: {last_error_txt}")
     return None
 
@@ -944,7 +949,6 @@ def api_route(req: RouteRequest):
                 end_lat=end_lat,
             )
 
-            # ---- LOW BRIDGE LOOKUP via BridgeEngine.check_leg ----
             result = bridge_engine.check_leg(
                 start_lat=start_lat,
                 start_lon=start_lon,
@@ -967,7 +971,6 @@ def api_route(req: RouteRequest):
                     }
                 )
 
-            # Try to compute alternative if there's a hard conflict
             alt_metrics: Optional[Dict[str, Any]] = None
             if result.has_conflict and result.nearest_bridge is not None:
                 alt_metrics = get_hgv_route_metrics_avoiding_bridge(
