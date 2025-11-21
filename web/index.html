@@ -5,14 +5,341 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>RouteSafe AI · Prototype</title>
 
-  <link rel="stylesheet" href="styles.css" />
-
   <!-- Leaflet CSS -->
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
     crossorigin=""
   />
+
+  <style>
+    :root {
+      --primary: #002c77;
+      --primary-dark: #0f2353;
+      --bg: #f3f4f6;
+      --card-bg: #ffffff;
+      --border: #d1d5db;
+      --muted: #6b7280;
+      --danger-bg: #fee2e2;
+      --danger-border: #fecaca;
+      --danger-text: #b91c1c;
+      --safe-bg: #ecfdf5;
+      --safe-border: #bbf7d0;
+      --radius-lg: 16px;
+      --shadow-card: 0 14px 35px rgba(15, 35, 83, 0.14);
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: #111827;
+    }
+
+    .hero {
+      background: radial-gradient(circle at top left, #1d4ed8, #020617);
+      color: #e5e7eb;
+      padding: 1.5rem 1rem 1.8rem;
+    }
+
+    .hero-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
+      margin-bottom: 0.4rem;
+    }
+
+    .brand-logo {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: #16a34a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.2rem;
+    }
+
+    .brand-title {
+      font-size: 1.2rem;
+      font-weight: 600;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: 1.9rem;
+      font-weight: 600;
+    }
+
+    .hero p {
+      margin: 0.4rem 0 0;
+      font-size: 0.93rem;
+      color: #cbd5f5;
+      max-width: 620px;
+    }
+
+    .version {
+      margin-top: 0.3rem;
+      font-size: 0.8rem;
+      color: #9ca3af;
+    }
+
+    .page {
+      max-width: 1100px;
+      margin: -1.5rem auto 0;
+      padding: 0 1rem 2.5rem;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.1fr);
+      gap: 1.2rem;
+    }
+
+    @media (max-width: 900px) {
+      .layout {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
+    .card {
+      background: var(--card-bg);
+      border-radius: var(--radius-lg);
+      padding: 1.2rem 1.3rem 1.4rem;
+      box-shadow: var(--shadow-card);
+      border: 1px solid rgba(15, 35, 83, 0.06);
+    }
+
+    .card h2 {
+      margin: 0 0 0.3rem;
+      font-size: 1.1rem;
+      color: var(--primary-dark);
+    }
+
+    .card-subtitle {
+      margin: 0 0 0.8rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .field {
+      margin-bottom: 0.85rem;
+    }
+
+    label {
+      display: block;
+      font-size: 0.85rem;
+      margin-bottom: 0.25rem;
+      font-weight: 500;
+      color: #374151;
+    }
+
+    input,
+    textarea {
+      width: 100%;
+      padding: 0.6rem 0.65rem;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      font-size: 0.9rem;
+      background: #f9fafb;
+    }
+
+    input:focus,
+    textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 1px rgba(0, 44, 119, 0.25);
+      background: #ffffff;
+    }
+
+    textarea {
+      min-height: 130px;
+      resize: vertical;
+      white-space: pre;
+    }
+
+    .hint {
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-top: 0.25rem;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+      padding: 0.65rem 1.35rem;
+      border-radius: 999px;
+      border: none;
+      background: #00b894;
+      color: #ffffff;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 10px 24px rgba(0, 184, 148, 0.35);
+      margin-top: 0.3rem;
+    }
+
+    .btn:hover {
+      background: #02a184;
+      box-shadow: 0 12px 26px rgba(0, 184, 148, 0.4);
+      transform: translateY(-1px);
+    }
+
+    .btn:disabled {
+      opacity: 0.65;
+      cursor: default;
+    }
+
+    .status {
+      margin-top: 0.8rem;
+      font-size: 0.83rem;
+    }
+
+    .status-error {
+      background: var(--danger-bg);
+      color: var(--danger-text);
+      border-radius: 10px;
+      padding: 0.65rem 0.75rem;
+    }
+
+    .status-ok {
+      color: #047857;
+    }
+
+    .legs-list {
+      margin-top: 0.5rem;
+      border-top: 1px solid #e5e7eb;
+      padding-top: 0.6rem;
+      max-height: 520px;
+      overflow-y: auto;
+      font-size: 0.86rem;
+    }
+
+    .leg {
+      border-radius: 14px;
+      border: 1px solid #e5e7eb;
+      padding: 0.7rem 0.75rem 0.9rem;
+      margin-bottom: 0.9rem;
+      background: #f9fafb;
+    }
+
+    .leg-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.35rem;
+      gap: 0.4rem;
+    }
+
+    .leg-title {
+      font-weight: 600;
+      color: #111827;
+      font-size: 0.95rem;
+    }
+
+    .pill {
+      padding: 0.15rem 0.8rem;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .pill-risk {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    .pill-safe {
+      background: #d1fae5;
+      color: #047857;
+    }
+
+    .leg-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem 0.8rem;
+      font-size: 0.78rem;
+      color: #4b5563;
+      margin-bottom: 0.4rem;
+    }
+
+    .variant {
+      border-radius: 12px;
+      padding: 0.7rem 0.75rem 0.8rem;
+      margin-top: 0.6rem;
+    }
+
+    .variant-risk {
+      background: var(--danger-bg);
+      border: 1px solid var(--danger-border);
+    }
+
+    .variant-safe {
+      background: var(--safe-bg);
+      border: 1px solid var(--safe-border);
+    }
+
+    .variant-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.6rem;
+      margin-bottom: 0.35rem;
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
+
+    .variant-title-main {
+      color: #111827;
+    }
+
+    .variant-title-sub {
+      color: #6b7280;
+      font-weight: 500;
+      text-align: right;
+    }
+
+    .variant-meta {
+      font-size: 0.8rem;
+      color: #374151;
+      margin-bottom: 0.35rem;
+    }
+
+    .leg-map {
+      margin-top: 0.35rem;
+      height: 210px;
+      min-height: 210px;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid #e5e7eb;
+      background: #f9fafb;
+    }
+
+    .variant-meta small {
+      color: #6b7280;
+      font-size: 0.76rem;
+    }
+
+    footer {
+      margin-top: 1.3rem;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+  </style>
 </head>
 <body>
   <div class="hero">
@@ -23,53 +350,40 @@
       </div>
       <h1>Build a safe HGV route</h1>
       <p>
-        Keep your drop order – RouteSafe AI checks each leg for low bridges
-        using OpenRouteService + a UK bridge dataset.
+        Keep your drop order – RouteSafe AI checks each leg for low bridges using ORS + a UK bridge dataset.
       </p>
-      <div class="version">Prototype v0.1 | Internal Use Only</div>
+      <div class="version">Prototype v0.3 | Internal Use Only</div>
     </div>
   </div>
 
   <div class="page">
     <div class="layout">
-      <!-- LEFT: form -->
       <div class="card">
         <h2>Route details</h2>
-        <p class="card-subtitle">
-          Enter depot, height and postcodes in order.
-        </p>
+        <p class="card-subtitle">Enter depot, height and postcodes in order.</p>
         <form id="route-form">
           <div class="field">
             <label>Depot postcode</label>
             <input id="depot" type="text" value="LS270BN" />
           </div>
-
           <div class="field">
             <label>Vehicle / trailer height (m)</label>
             <input id="height" type="number" step="0.1" value="4.0" />
             <div class="hint">Full running height.</div>
           </div>
-
           <div class="field">
             <label>Delivery postcodes in order</label>
             <textarea id="stops">Hd5 0rl</textarea>
             <div class="hint">One postcode per line.</div>
           </div>
-
           <button class="btn" id="generate-btn">Generate safe legs</button>
           <div id="status" class="status"></div>
         </form>
       </div>
 
-      <!-- RIGHT: map + legs -->
       <div class="card">
-        <h2>Route map & legs</h2>
-        <p class="card-subtitle">
-          Map preview plus each leg checked for low bridges.
-        </p>
-
-        <div id="map"></div>
-
+        <h2>Route legs</h2>
+        <p class="card-subtitle">Each leg checked for low bridges.</p>
         <div id="legs-container" class="legs-list">
           <div class="hint">
             Enter route on the left and click <strong>Generate</strong>.
@@ -79,17 +393,257 @@
     </div>
 
     <footer>
-      Data source: OpenRouteService directions + internal UK low bridge
-      dataset (beta).
+      Data source: OpenRouteService + internal UK low bridge dataset.
     </footer>
   </div>
 
   <!-- Leaflet JS -->
   <script
     src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-o9N1j7kGIC3bJlP2G8VHx0LhQv0vM1sM/5p3pqtIDJk="
     crossorigin=""
   ></script>
 
-  <script src="app.js" defer></script>
+  <script>
+    const BACKEND_URL = "/api/route";
+
+    const form = document.getElementById("route-form");
+    const statusEl = document.getElementById("status");
+    const legsContainer = document.getElementById("legs-container");
+    const generateBtn = document.getElementById("generate-btn");
+
+    function setStatus(msg, type = "info") {
+      if (!msg) {
+        statusEl.textContent = "";
+        statusEl.className = "status";
+        return;
+      }
+      statusEl.textContent = msg;
+      statusEl.className =
+        type === "error" ? "status status-error" : "status status-ok";
+    }
+
+    function renderLegMap(geometry, mapId, colorVariant) {
+      const el = document.getElementById(mapId);
+      if (!el) return;
+
+      // Ensure visible height so Leaflet can draw
+      el.style.minHeight = "210px";
+
+      if (!geometry || !geometry.length || typeof L === "undefined") {
+        el.innerHTML =
+          '<div class="hint" style="padding:0.6rem;">No map data available for this leg.</div>';
+        return;
+      }
+
+      // ORS geometry: [lon, lat] -> Leaflet [lat, lon]
+      const latLngs = geometry.map(([lon, lat]) => [lat, lon]);
+
+      // Small delay lets browser layout the card before Leaflet initialises (mobile fix)
+      setTimeout(() => {
+        const map = L.map(mapId, {
+          zoomControl: false,
+          attributionControl: false,
+        });
+
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+        }).addTo(map);
+
+        const line = L.polyline(latLngs, {
+          weight: 4,
+        }).addTo(map);
+
+        map.fitBounds(line.getBounds(), { padding: [10, 10] });
+      }, 50);
+    }
+
+    function renderLegs(legs) {
+      legsContainer.innerHTML = "";
+      if (!legs || !legs.length) {
+        legsContainer.innerHTML =
+          '<div class="hint">No legs returned from backend.</div>';
+        return;
+      }
+
+      legs.forEach((leg, idx) => {
+        // Support both new (primary/alternative) and old (single leg) shapes
+        const primary = leg.primary || leg;
+        const alternative = leg.alternative || null;
+
+        const primaryBridges = primary.low_bridges || leg.low_bridges || [];
+        const risky = primaryBridges.length > 0;
+
+        const wrapper = document.createElement("div");
+        wrapper.className = "leg";
+
+        // main header
+        const header = document.createElement("div");
+        header.className = "leg-header";
+
+        const title = document.createElement("div");
+        title.className = "leg-title";
+        title.textContent = `Leg ${idx + 1}: ${leg.from_postcode} → ${leg.to_postcode}`;
+
+        const pill = document.createElement("div");
+        pill.className = "pill " + (risky ? "pill-risk" : "pill-safe");
+        pill.textContent = risky ? "LOW BRIDGE(S)" : "HGV SAFE";
+
+        header.appendChild(title);
+        header.appendChild(pill);
+
+        const meta = document.createElement("div");
+        meta.className = "leg-meta";
+        meta.innerHTML = `
+          <span>Vehicle height: ${leg.vehicle_height_m} m</span>
+        `;
+
+        wrapper.appendChild(header);
+        wrapper.appendChild(meta);
+
+        // --- Primary / via-low-bridge variant ---
+        const vPrimary = document.createElement("div");
+        vPrimary.className = "variant variant-risk";
+
+        const vPrimaryHeader = document.createElement("div");
+        vPrimaryHeader.className = "variant-header";
+        vPrimaryHeader.innerHTML = `
+          <div class="variant-title-main">Route via low bridge area</div>
+          <div class="variant-title-sub">Use only if you know the local restriction.</div>
+        `;
+
+        const vPrimaryMeta = document.createElement("div");
+        vPrimaryMeta.className = "variant-meta";
+        const pDist = primary.distance_km ?? leg.distance_km;
+        const pDur = primary.duration_min ?? leg.duration_min;
+
+        let bridgesSummary = "No low bridges detected.";
+        if (primaryBridges.length > 0) {
+          const first = primaryBridges[0];
+          const extra = primaryBridges.length - 1;
+          const extraTxt = extra > 0 ? ` (+${extra} more)` : "";
+          bridgesSummary =
+            `<strong>${primaryBridges.length}</strong> low bridge(s). ` +
+            `Bridge at approx ${first.bridge_height_m.toFixed(4)} m${extraTxt}.`;
+        }
+
+        vPrimaryMeta.innerHTML = `
+          Distance: ${pDist} km · Time: ${pDur} min<br/>
+          <small>${bridgesSummary}</small>
+        `;
+
+        const primaryMapId = `leg-${idx}-primary-map`;
+        const primaryMapDiv = document.createElement("div");
+        primaryMapDiv.className = "leg-map";
+        primaryMapDiv.id = primaryMapId;
+
+        vPrimary.appendChild(vPrimaryHeader);
+        vPrimary.appendChild(vPrimaryMeta);
+        vPrimary.appendChild(primaryMapDiv);
+
+        wrapper.appendChild(vPrimary);
+
+        // --- Alternative / bubble-avoid variant ---
+        if (alternative) {
+          const vAlt = document.createElement("div");
+          vAlt.className = "variant variant-safe";
+
+          const vAltHeader = document.createElement("div");
+          vAltHeader.className = "variant-header";
+          vAltHeader.innerHTML = `
+            <div class="variant-title-main">Alternative route (bubble avoid)</div>
+            <div class="variant-title-sub">Designed to steer clear of the low bridge bubble.</div>
+          `;
+
+          const vAltMeta = document.createElement("div");
+          vAltMeta.className = "variant-meta";
+          vAltMeta.innerHTML = `
+            Distance: ${alternative.distance_km} km · Time: ${alternative.duration_min} min<br/>
+            <small>Planned to avoid the low-bridge area.</small>
+          `;
+
+          const altMapId = `leg-${idx}-alt-map`;
+          const altMapDiv = document.createElement("div");
+          altMapDiv.className = "leg-map";
+          altMapDiv.id = altMapId;
+
+          vAlt.appendChild(vAltHeader);
+          vAlt.appendChild(vAltMeta);
+          vAlt.appendChild(altMapDiv);
+
+          wrapper.appendChild(vAlt);
+
+          // Render maps after the card is in the DOM
+          legsContainer.appendChild(wrapper);
+          renderLegMap(primary.geometry || leg.geometry || null, primaryMapId, "risk");
+          renderLegMap(alternative.geometry || null, altMapId, "safe");
+        } else {
+          legsContainer.appendChild(wrapper);
+          renderLegMap(primary.geometry || leg.geometry || null, primaryMapId, "risk");
+        }
+      });
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const depot = document.getElementById("depot").value.trim();
+      const height = parseFloat(document.getElementById("height").value);
+      const stops = document
+        .getElementById("stops")
+        .value.split("\n")
+        .map((x) => x.trim())
+        .filter((x) => x.length > 0);
+
+      if (!depot || stops.length === 0) {
+        setStatus("Enter depot + at least one postcode.", "error");
+        return;
+      }
+
+      if (!height || height <= 0) {
+        setStatus("Vehicle height must be a positive number in metres.", "error");
+        return;
+      }
+
+      setStatus("Contacting backend…");
+      generateBtn.disabled = true;
+
+      try {
+        const resp = await fetch(BACKEND_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            depot_postcode: depot,
+            vehicle_height_m: height,
+            stops: stops,
+          }),
+        });
+
+        const text = await resp.text();
+        let data = null;
+        try {
+          data = JSON.parse(text);
+        } catch (err) {
+          throw new Error("Invalid JSON from backend.");
+        }
+
+        if (!resp.ok) {
+          const errMsg =
+            (data && (data.detail || data.message)) ||
+            `Status ${resp.status}`;
+          throw new Error(errMsg);
+        }
+
+        renderLegs(data.legs);
+        setStatus("Route generated successfully.");
+      } catch (err) {
+        console.error(err);
+        setStatus("Backend error: " + (err.message || err), "error");
+        legsContainer.innerHTML =
+          '<div class="hint">No results – backend returned an error.</div>';
+      } finally {
+        generateBtn.disabled = false;
+      }
+    });
+  </script>
 </body>
 </html>
