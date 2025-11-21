@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Tuple, Any, Optional
+from typing import List, Dict, Tuple, Any
 
 import requests
 from fastapi import FastAPI, HTTPException
@@ -9,9 +9,12 @@ from pydantic import BaseModel
 
 from bridge_engine import BridgeEngine
 
+# -------------------------------------------------------------------
+# Config
+# -------------------------------------------------------------------
 
-# CONFIG
 ORS_API_KEY = os.getenv("ORS_API_KEY")
+
 if not ORS_API_KEY:
     print("WARNING: ORS_API_KEY environment variable is not set.")
 
@@ -20,21 +23,27 @@ BRIDGE_CSV_PATH = os.path.join(BASE_DIR, "bridge_heights_clean.csv")
 
 bridge_engine = BridgeEngine(BRIDGE_CSV_PATH)
 
-# APP
-app = FastAPI(title="RouteSafe AI Backend", version="0.5")
+# -------------------------------------------------------------------
+# FastAPI setup
+# -------------------------------------------------------------------
+
+app = FastAPI(title="RouteSafe AI Backend", version="0.6")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
-)
+)# -------------------------------------------------------------------
+# Models
+# -------------------------------------------------------------------
 
-# MODELS
 class RouteRequest(BaseModel):
     depot_postcode: str
     stops: List[str]
     vehicle_height_m: float
+
 
 class BridgeOut(BaseModel):
     name: str | None = None
@@ -43,6 +52,7 @@ class BridgeOut(BaseModel):
     lat: float
     lon: float
 
+
 class RouteLegOut(BaseModel):
     from_postcode: str
     to_postcode: str
@@ -50,287 +60,366 @@ class RouteLegOut(BaseModel):
     duration_min: float
     vehicle_height_m: float
     low_bridges: List[BridgeOut]
-    geometry_main: List[List[float]] | None = None
-    geometry_alt: List[List[float]] | None = None
-    alt_distance_km: float | None = None
-    alt_duration_min: float | None = None
+    geometry: List[List[float]] | None = None
+
 
 class RouteResponse(BaseModel):
     legs: List[RouteLegOut]
+
+
 # -------------------------------------------------------------------
-# GEOCODING + ORS HELPERS
+# UI HTML (Leaflet map included)
 # -------------------------------------------------------------------
 
-def geocode_postcode(pc: str) -> Tuple[float, float]:
-    """
-    Geocode postcode -> (lat, lon)
-    """
+HTML_PAGE = """
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RouteSafe AI</title>
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+
+  <style>
+    body { margin: 0; font-family: system-ui; background: #f3f4f6; }
+    .page { max-width: 1100px; margin: 20px auto; padding: 10px; }
+    .card { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,.1); margin-bottom: 20px; }
+    .leg-map { height: 250px; border-radius: 10px; overflow: hidden; margin-top: 10px; border: 1px solid #ddd; }
+    .pill-safe { background: #d1fae5; padding: 4px 8px; border-radius: 8px; color:#065f46; }
+    .pill-risk { background: #fee2e2; padding: 4px 8px; border-radius: 8px; color:#991b1b; }
+  </style>
+</head>
+
+<body>
+<div class="page">
+  <div class="card">
+    <h2>Build HGV Route</h2>
+    <form id="route-form">
+      <label>Depot postcode</label>
+      <input id="depot" value="LS270BN" />
+
+      <label>Vehicle height (m)</label>
+      <input id="height" type="number" step="0.1" value="4.0" />
+
+      <label>Delivery postcodes (one per line)</label>
+      <textarea id="stops">HD5 0RL</textarea>
+
+      <button id="generate-btn">Generate</button>
+      <div id="status"></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Route legs</h2>
+    <div id="legs-container"></div>
+  </div>
+</div>
+
+<!-- Leaflet JS -->
+<script
+  src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-o9N1j7kGIC3bJlP2G8VHx0LhQv0vM1sM/5p3pqtIDJk="
+  crossorigin=""></script>
+
+<script>
+const BACKEND_URL = "/api/route";// ---------------------------------------------------------------
+// JS helpers
+// ---------------------------------------------------------------
+
+function setStatus(msg, error=false) {
+    const st = document.getElementById("status");
+    st.textContent = msg;
+    st.style.color = error ? "red" : "green";
+}
+
+function renderLegMap(geometry, mapId) {
+    if (!geometry || !geometry.length) return;
+
+    // Convert ORS [[lon,lat], ...] → Leaflet [lat,lon]
+    const latlngs = geometry.map(p => [p[1], p[0]]);
+
+    const map = L.map(mapId, { zoomControl:false });
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+    }).addTo(map);
+
+    const poly = L.polyline(latlngs, { color:"#0f62fe", weight:4 }).addTo(map);
+    map.fitBounds(poly.getBounds(), { padding:[12,12] });
+}
+
+function renderLegs(legs) {
+    const container = document.getElementById("legs-container");
+    container.innerHTML = "";
+
+    if (!legs || !legs.length) {
+        container.innerHTML = "<p>No legs returned.</p>";
+        return;
+    }
+
+    legs.forEach((leg, idx) => {
+        const wrap = document.createElement("div");
+        wrap.style.border = "1px solid #ddd";
+        wrap.style.padding = "10px";
+        wrap.style.borderRadius = "10px";
+        wrap.style.marginBottom = "15px";
+
+        const risky = leg.low_bridges && leg.low_bridges.length > 0;
+
+        wrap.innerHTML = `
+            <h3>Leg ${idx+1}: ${leg.from_postcode} → ${leg.to_postcode}</h3>
+            <div>
+                <span>Distance: ${leg.distance_km} km</span><br>
+                <span>Time: ${leg.duration_min} min</span><br>
+                <span>Vehicle height: ${leg.vehicle_height_m} m</span><br>
+                <span class="${risky ? "pill-risk" : "pill-safe"}">
+                    ${risky ? "LOW BRIDGE RISK" : "HGV SAFE"}
+                </span>
+            </div>
+        `;
+
+        // Map container
+        const mapId = `map-${idx}`;
+        const mapDiv = document.createElement("div");
+        mapDiv.className = "leg-map";
+        mapDiv.id = mapId;
+        wrap.appendChild(mapDiv);
+
+        container.appendChild(wrap);
+
+        // Draw map
+        if (leg.geometry) {
+            renderLegMap(leg.geometry, mapId);
+        } else {
+            mapDiv.innerHTML = "<p>No geometry for this leg.</p>";
+        }
+    });
+}
+
+
+// ---------------------------------------------------------------
+// Form handler
+// ---------------------------------------------------------------
+
+document.getElementById("route-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    setStatus("Loading…");
+
+    const depot = document.getElementById("depot").value.trim();
+    const height = parseFloat(document.getElementById("height").value);
+    const stops = document
+        .getElementById("stops")
+        .value
+        .split("\n")
+        .map(x => x.trim())
+        .filter(x => x.length > 0);
+
+    if (!depot || stops.length === 0) {
+        setStatus("Enter depot + at least one stop", true);
+        return;
+    }
+
+    try {
+        const resp = await fetch(BACKEND_URL, {
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body: JSON.stringify({
+                depot_postcode: depot,
+                vehicle_height_m: height,
+                stops: stops
+            })
+        });
+
+        const text = await resp.text();
+        let data = null;
+        try { data = JSON.parse(text); } catch {}
+
+        if (!resp.ok) {
+            setStatus(data?.detail || "Backend error", true);
+            return;
+        }
+
+        renderLegs(data.legs);
+        setStatus("Route generated.");
+    }
+    catch(err) {
+        console.error(err);
+        setStatus("Network or backend error.", true);
+    }
+});
+</script>
+
+</body>
+</html>
+"""
+# -------------------------------------------------------------------
+# ORS Helpers
+# -------------------------------------------------------------------
+
+def geocode_postcode(postcode: str) -> Tuple[float, float]:
+    """Return (lat, lon)."""
     if not ORS_API_KEY:
         raise HTTPException(500, "ORS_API_KEY missing")
 
     url = "https://api.openrouteservice.org/geocode/search"
     params = {
         "api_key": ORS_API_KEY,
-        "text": pc,
+        "text": postcode,
         "size": 1,
         "boundary.country": "GB",
     }
 
     r = requests.get(url, params=params, timeout=20)
     if r.status_code != 200:
-        raise HTTPException(502, f"ORS geocode failed: {r.text[:200]}")
+        raise HTTPException(502, f"Geocode failed: {r.text[:200]}")
 
     data = r.json()
     feats = data.get("features", [])
     if not feats:
-        raise HTTPException(400, f"No geocoding result for {pc}")
+        raise HTTPException(400, f"No result for postcode {postcode}")
 
     lon, lat = feats[0]["geometry"]["coordinates"]
     return float(lat), float(lon)
 
 
-def _extract_summary_from_ors(data: Dict[str, Any], raw: str) -> Dict[str, Any]:
-    """
-    Extract distance, duration, geometry from ORS response.
-    Returns:
-      { distance_km, duration_min, geometry }
-    """
+def _extract_summary(data: Dict[str, Any], raw: str) -> Dict[str, Any]:
+    """Extract distance, duration, geometry from ORS."""
     try:
         if "routes" in data:
             r0 = data["routes"][0]
             summary = r0["summary"]
             geom = r0.get("geometry")
             coords = geom.get("coordinates") if isinstance(geom, dict) else geom
-
         elif "features" in data:
             f0 = data["features"][0]
             summary = f0["properties"]["summary"]
             geom = f0.get("geometry")
             coords = geom.get("coordinates") if isinstance(geom, dict) else geom
-
         else:
-            raise KeyError("Missing 'routes' or 'features'")
-
+            raise KeyError("No routes or features")
     except Exception as e:
         raise HTTPException(
             502,
-            f"ORS parse error: {e} | Payload: {raw[:300]}"
+            f"Unexpected ORS routing format: {e} | payload: {raw[:200]}"
         )
 
-    distance_km = float(summary["distance"]) / 1000.0
-    duration_min = float(summary["duration"]) / 60.0
-
     return {
-        "distance_km": round(distance_km, 2),
-        "duration_min": round(duration_min, 1),
+        "distance_km": round(float(summary["distance"]) / 1000, 2),
+        "duration_min": round(float(summary["duration"]) / 60, 1),
         "geometry": coords,
     }
-# -------------------------------------------------------------------
-# ROUTING (MAIN + OPTIONAL AVOID-POLYGON)
-# -------------------------------------------------------------------
 
-def get_hgv_route_metrics(
-    start_lon: float,
-    start_lat: float,
-    end_lon: float,
-    end_lat: float,
-    avoid_polygon: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """
-    Call ORS HGV routing (fallback to car). Always returns:
-      - distance_km
-      - duration_min
-      - geometry  (fallback: straight line)
-    """
 
+def get_route_metrics(start_lon, start_lat, end_lon, end_lat) -> Dict[str, Any]:
+    """Call ORS driving-hgv → fallback driving-car."""
     if not ORS_API_KEY:
-        raise HTTPException(500, "ORS_API_KEY not configured")
+        raise HTTPException(500, "ORS_API_KEY missing")
 
-    def call(profile: str):
-        url = f"https://api.openrouteservice.org/v2/directions/{profile}/geojson"
-
-        body: Dict[str, Any] = {
-            "coordinates": [[start_lon, start_lat], [end_lon, end_lat]]
-        }
-
-        if avoid_polygon:
-            body["options"] = {"avoid_polygons": avoid_polygon}
-
-        headers = {
-            "Authorization": ORS_API_KEY,
-            "Content-Type": "application/json",
-        }
-
-        return profile, requests.post(url, json=body, headers=headers, timeout=25)
-
-    last_err = None
+    headers = {
+        "Authorization": ORS_API_KEY,
+        "Content-Type": "application/json",
+    }
+    body = {"coordinates": [[start_lon, start_lat], [end_lon, end_lat]]}
 
     for profile in ["driving-hgv", "driving-car"]:
-        prof, resp = call(profile)
+        url = f"https://api.openrouteservice.org/v2/directions/{profile}"
+        r = requests.post(url, json=body, headers=headers, timeout=25)
 
-        if resp.status_code != 200:
-            last_err = f"{prof}: {resp.status_code} :: {resp.text[:200]}"
+        if r.status_code != 200:
             continue
 
-        raw = resp.text
-        data = resp.json()
+        return _extract_summary(r.json(), r.text)
 
-        out = _extract_summary_from_ors(data, raw)
+    raise HTTPException(
+        502,
+        f"ORS failed for both HGV & CAR: {r.text[:200]}"
+    )
 
-        # Ensure geometry exists
-        if not out["geometry"]:
-            out["geometry"] = [
-                [float(start_lon), float(start_lat)],
-                [float(end_lon), float(end_lat)],
-            ]
 
-        return out
-
-    # If both profiles fail
-    raise HTTPException(502, f"ORS failed: {last_err}")
 # -------------------------------------------------------------------
-# ENDPOINTS
+# Routes
 # -------------------------------------------------------------------
 
 @app.get("/", response_class=HTMLResponse)
-def root():
-    """
-    Simple root – useful just to confirm backend is up.
-    Frontend UI is served separately (Render static / index.html).
-    """
-    return HTMLResponse("RouteSafe backend OK", 200)
+def serve_ui():
+    return HTMLResponse(content=HTML_PAGE)
 
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "RouteSafe AI backend"}
+    return {"ok": True}
 
 
 @app.post("/api/route", response_model=RouteResponse)
 def api_route(req: RouteRequest):
-    """
-    Main entry point for the frontend.
-
-    - Geocode depot + stops
-    - Build legs in order
-    - For each leg:
-        * Get main route metrics + geometry via ORS
-        * Use BridgeEngine to detect nearest low bridge
-        * If found, request an alternative route with a small avoid polygon
-    """
-
-    if req.vehicle_height_m <= 0:
-        raise HTTPException(400, "Vehicle height must be positive")
 
     depot_pc = req.depot_postcode.strip().upper()
+    stops_clean = [s.strip().upper() for s in req.stops if s.strip()]
+
     if not depot_pc:
-        raise HTTPException(400, "Depot postcode must not be empty")
+        raise HTTPException(400, "Depot missing")
 
-    # Geocode depot
+    if not stops_clean:
+        raise HTTPException(400, "At least one stop required")
+
+    # Geocode
+    points: List[Tuple[float, float]] = []
+    postcodes: List[str] = []
+
     depot_lat, depot_lon = geocode_postcode(depot_pc)
-    points: List[Tuple[float, float]] = [(depot_lat, depot_lon)]
-    postcodes: List[str] = [depot_pc]
+    points.append((depot_lat, depot_lon))
+    postcodes.append(depot_pc)
 
-    # Geocode stops
-    for pc in req.stops:
-        pc_clean = pc.strip().upper()
-        if not pc_clean:
-            continue
-        lat, lon = geocode_postcode(pc_clean)
+    for pc in stops_clean:
+        lat, lon = geocode_postcode(pc)
         points.append((lat, lon))
-        postcodes.append(pc_clean)
+        postcodes.append(pc)
 
-    if len(points) < 2:
-        raise HTTPException(400, "Need at least one delivery postcode")
+    # Legs
+    legs_out: List[Dict[str, Any]] = []
 
-    legs: List[Dict[str, Any]] = []
-
-    # Build each leg in sequence
     for i in range(len(points) - 1):
         start_lat, start_lon = points[i]
         end_lat, end_lon = points[i + 1]
 
-        # -------- MAIN ROUTE --------
-        main = get_hgv_route_metrics(
-            start_lon=start_lon,
-            start_lat=start_lat,
-            end_lon=end_lon,
-            end_lat=end_lat,
+        # ORS main route
+        metrics = get_route_metrics(
+            start_lon, start_lat, end_lon, end_lat
         )
-        geometry_main = main["geometry"]
 
-        # -------- BRIDGE CHECK --------
-        br = bridge_engine.check_leg(
+        # Bridge check (nearest)
+        result = bridge_engine.check_leg(
             start_lat=start_lat,
             start_lon=start_lon,
             end_lat=end_lat,
             end_lon=end_lon,
-            vehicle_height_m=req.vehicle_height_m,
+            vehicle_height_m=req.vehicle_height_m
         )
 
-        bridge_list: List[Dict[str, Any]] = []
-        if br.nearest_bridge:
-            bridge_list.append(
-                {
-                    "name": None,
-                    "bridge_height_m": float(br.nearest_bridge.height_m),
-                    "distance_from_start_m": float(br.nearest_distance_m or 0.0),
-                    "lat": float(br.nearest_bridge.lat),
-                    "lon": float(br.nearest_bridge.lon),
-                }
-            )
+        low_bridges = []
+        if result.nearest_bridge:
+            low_bridges.append({
+                "name": None,
+                "bridge_height_m": float(result.nearest_bridge.height_m),
+                "distance_from_start_m": float(result.nearest_distance_m or 0),
+                "lat": float(result.nearest_bridge.lat),
+                "lon": float(result.nearest_bridge.lon),
+            })
 
-        # -------- ALT ROUTE (AVOID BUBBLE) --------
-        geometry_alt: Optional[List[List[float]]] = None
-        alt_dist: Optional[float] = None
-        alt_time: Optional[float] = None
+        legs_out.append({
+            "from_postcode": postcodes[i],
+            "to_postcode": postcodes[i + 1],
+            "distance_km": metrics["distance_km"],
+            "duration_min": metrics["duration_min"],
+            "vehicle_height_m": req.vehicle_height_m,
+            "low_bridges": low_bridges,
+            "geometry": metrics["geometry"],
+        })
 
-        if br.nearest_bridge:
-            bx = float(br.nearest_bridge.lon)
-            by = float(br.nearest_bridge.lat)
-
-            # Simple square around bridge (~100–150m)
-            off = 0.0013
-            avoid_poly: Dict[str, Any] = {
-                "type": "Polygon",
-                "coordinates": [[
-                    [bx - off, by - off],
-                    [bx + off, by - off],
-                    [bx + off, by + off],
-                    [bx - off, by + off],
-                    [bx - off, by - off],
-                ]],
-            }
-
-            try:
-                alt = get_hgv_route_metrics(
-                    start_lon=start_lon,
-                    start_lat=start_lat,
-                    end_lon=end_lon,
-                    end_lat=end_lat,
-                    avoid_polygon=avoid_poly,
-                )
-                geometry_alt = alt["geometry"]
-                alt_dist = alt["distance_km"]
-                alt_time = alt["duration_min"]
-            except HTTPException as e:
-                # If ORS can’t find an avoidance route, log and keep main only
-                print(f"[ALT ROUTE] ORS failed for leg {i}: {e.detail}")
-
-        # -------- BUILD LEG OUTPUT --------
-        legs.append(
-            {
-                "from_postcode": postcodes[i],
-                "to_postcode": postcodes[i + 1],
-                "distance_km": main["distance_km"],
-                "duration_min": main["duration_min"],
-                "vehicle_height_m": req.vehicle_height_m,
-                "low_bridges": bridge_list,
-                "geometry_main": geometry_main,
-                "geometry_alt": geometry_alt,
-                "alt_distance_km": alt_dist,
-                "alt_duration_min": alt_time,
-            }
-        )
-
-    return {"legs": legs}
+    return {"legs": legs_out}
