@@ -72,7 +72,7 @@ class RouteResponse(BaseModel):
 
 
 # -------------------------------------------------------------------
-# UI HTML (now with Leaflet map support)
+# UI HTML (Leaflet map + red/green routes)
 # -------------------------------------------------------------------
 
 HTML_PAGE = """
@@ -343,7 +343,7 @@ HTML_PAGE = """
       </div>
       <h1>Build a safe HGV route</h1>
       <p>Keep your drop order – RouteSafe AI checks each leg for low bridges using ORS + a UK bridge dataset.</p>
-      <div class="version">Prototype v0.1 | Internal Use Only</div>
+      <div class="version">Prototype v0.3 | Internal Use Only</div>
     </div>
   </div>
 
@@ -408,8 +408,13 @@ HTML_PAGE = """
         type === "error" ? "status status-error" : "status status-ok";
     }
 
-    function renderLegMap(geometry, mapId) {
+    function renderLegMap(geometry, mapId, risky) {
       if (!geometry || !geometry.length || typeof L === "undefined") {
+        const el = document.getElementById(mapId);
+        if (el) {
+          el.innerHTML =
+            '<div class="hint" style="padding:0.6rem;">No map data available for this leg.</div>';
+        }
         return;
       }
       // geometry is [[lon, lat], ...] – Leaflet wants [lat, lon]
@@ -424,7 +429,12 @@ HTML_PAGE = """
         maxZoom: 19,
       }).addTo(map);
 
-      const line = L.polyline(latLngs).addTo(map);
+      const line = L.polyline(latLngs, {
+        // Red if risky, green if safe
+        color: risky ? "#dc2626" : "#16a34a",
+        weight: 5,
+      }).addTo(map);
+
       map.fitBounds(line.getBounds(), { padding: [10, 10] });
     }
 
@@ -487,14 +497,8 @@ HTML_PAGE = """
 
         legsContainer.appendChild(wrapper);
 
-        // draw map
-        if (leg.geometry && leg.geometry.length) {
-          renderLegMap(leg.geometry, mapId);
-        } else {
-          // no geometry – show a hint
-          mapDiv.innerHTML =
-            '<div class="hint" style="padding:0.6rem;">No map data available for this leg.</div>';
-        }
+        // draw map with red/green route
+        renderLegMap(leg.geometry, mapId, risky);
       });
     }
 
@@ -615,27 +619,45 @@ def geocode_postcode(postcode: str) -> Tuple[float, float]:
     return float(lat), float(lon)
 
 
+def _coerce_geometry_coords(geom: Any) -> List[List[float]] | None:
+    """
+    Try to normalise ORS geometry field into [[lon, lat], ...].
+
+    We deliberately ignore anything that isn't a list-of-lists-of-numbers
+    so we never crash the API if ORS changes format.
+    """
+    if isinstance(geom, dict):
+        geom = geom.get("coordinates")
+
+    if not isinstance(geom, list):
+        return None
+
+    cleaned: List[List[float]] = []
+    for item in geom:
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            try:
+                lon = float(item[0])
+                lat = float(item[1])
+                cleaned.append([lon, lat])
+            except (TypeError, ValueError):
+                continue
+
+    return cleaned or None
+
+
 def _extract_summary_from_ors(data: Dict[str, Any], raw_text: str) -> Dict[str, Any]:
     """Normalise ORS JSON/GeoJSON into distance_km + duration_min + geometry."""
     summary: Dict[str, Any] | None = None
-    geometry_coords = None
+    geometry_coords: List[List[float]] | None = None
     try:
         if "routes" in data:
             route0 = data["routes"][0]
             summary = route0["summary"]
-            geom = route0.get("geometry")
-            if isinstance(geom, dict):
-                geometry_coords = geom.get("coordinates")
-            else:
-                geometry_coords = geom
+            geometry_coords = _coerce_geometry_coords(route0.get("geometry"))
         elif "features" in data:
             feat0 = data["features"][0]
             summary = feat0["properties"]["summary"]
-            geom = feat0.get("geometry")
-            if isinstance(geom, dict):
-                geometry_coords = geom.get("coordinates")
-            else:
-                geometry_coords = geom
+            geometry_coords = _coerce_geometry_coords(feat0.get("geometry"))
         else:
             raise KeyError("Neither 'routes' nor 'features' present")
     except (KeyError, IndexError, TypeError) as e:
@@ -651,9 +673,9 @@ def _extract_summary_from_ors(data: Dict[str, Any], raw_text: str) -> Dict[str, 
     duration_min = float(summary["duration"]) / 60.0
 
     return {
-      "distance_km": round(distance_km, 2),
-      "duration_min": round(duration_min, 1),
-      "geometry": geometry_coords,
+        "distance_km": round(distance_km, 2),
+        "duration_min": round(duration_min, 1),
+        "geometry": geometry_coords,
     }
 
 
