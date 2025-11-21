@@ -24,7 +24,7 @@ BRIDGE_CSV_PATH = os.path.join(BASE_DIR, "bridge_heights_clean.csv")
 bridge_engine = BridgeEngine(BRIDGE_CSV_PATH)
 
 # -------------------------------------------------------------------
-# FastAPI setup
+# FastAPI app
 # -------------------------------------------------------------------
 
 app = FastAPI(title="RouteSafe AI Backend", version="0.6")
@@ -35,8 +35,10 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
-)# -------------------------------------------------------------------
-# Models
+)
+
+# -------------------------------------------------------------------
+# Pydantic models
 # -------------------------------------------------------------------
 
 class RouteRequest(BaseModel):
@@ -60,7 +62,6 @@ class RouteLegOut(BaseModel):
     duration_min: float
     vehicle_height_m: float
     low_bridges: List[BridgeOut]
-    geometry: List[List[float]] | None = None
 
 
 class RouteResponse(BaseModel):
@@ -68,172 +69,413 @@ class RouteResponse(BaseModel):
 
 
 # -------------------------------------------------------------------
-# UI HTML (Leaflet map included)
+# HTML UI (nicer UI than the plain form)
 # -------------------------------------------------------------------
 
 HTML_PAGE = """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RouteSafe AI</title>
-
-  <!-- Leaflet CSS -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-    crossorigin=""
-  />
-
+  <title>RouteSafe AI · HGV Route Checker</title>
   <style>
-    body { margin: 0; font-family: system-ui; background: #f3f4f6; }
-    .page { max-width: 1100px; margin: 20px auto; padding: 10px; }
-    .card { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,.1); margin-bottom: 20px; }
-    .leg-map { height: 250px; border-radius: 10px; overflow: hidden; margin-top: 10px; border: 1px solid #ddd; }
-    .pill-safe { background: #d1fae5; padding: 4px 8px; border-radius: 8px; color:#065f46; }
-    .pill-risk { background: #fee2e2; padding: 4px 8px; border-radius: 8px; color:#991b1b; }
+    :root {
+      --primary: #002c77;
+      --primary-dark: #0f2353;
+      --bg: #f3f4f6;
+      --card-bg: #ffffff;
+      --border: #d1d5db;
+      --muted: #6b7280;
+      --danger-bg: #fee2e2;
+      --danger-text: #b91c1c;
+      --safe-bg: #dcfce7;
+      --safe-text: #166534;
+      --radius-lg: 16px;
+      --shadow-card: 0 14px 35px rgba(15, 35, 83, 0.14);
+    }
+    * {
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: #111827;
+    }
+    .hero {
+      background: radial-gradient(circle at top left, #1d4ed8, #020617);
+      color: #e5e7eb;
+      padding: 1.5rem 1rem 1.8rem;
+    }
+    .hero-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
+      margin-bottom: 0.4rem;
+    }
+    .brand-logo {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: #16a34a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.2rem;
+    }
+    .brand-title {
+      font-size: 1.2rem;
+      font-weight: 600;
+    }
+    .hero h1 {
+      margin: 0;
+      font-size: 1.9rem;
+      font-weight: 600;
+    }
+    .hero p {
+      margin: 0.4rem 0 0;
+      font-size: 0.93rem;
+      color: #cbd5f5;
+      max-width: 620px;
+    }
+    .version {
+      margin-top: 0.3rem;
+      font-size: 0.8rem;
+      color: #9ca3af;
+    }
+    .page {
+      max-width: 1100px;
+      margin: -1.5rem auto 0;
+      padding: 0 1rem 2.5rem;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.1fr);
+      gap: 1.2rem;
+    }
+    @media (max-width: 900px) {
+      .layout {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+    .card {
+      background: var(--card-bg);
+      border-radius: var(--radius-lg);
+      padding: 1.2rem 1.3rem 1.4rem;
+      box-shadow: var(--shadow-card);
+      border: 1px solid rgba(15, 35, 83, 0.06);
+    }
+    .card h2 {
+      margin: 0 0 0.3rem;
+      font-size: 1.1rem;
+      color: var(--primary-dark);
+    }
+    .card-subtitle {
+      margin: 0 0 0.8rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .field {
+      margin-bottom: 0.85rem;
+    }
+    label {
+      display: block;
+      font-size: 0.85rem;
+      margin-bottom: 0.25rem;
+      font-weight: 500;
+      color: #374151;
+    }
+    input,
+    textarea {
+      width: 100%;
+      padding: 0.6rem 0.65rem;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      font-size: 0.9rem;
+      background: #f9fafb;
+    }
+    input:focus,
+    textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 1px rgba(0, 44, 119, 0.25);
+      background: #ffffff;
+    }
+    textarea {
+      min-height: 130px;
+      resize: vertical;
+      white-space: pre;
+    }
+    .hint {
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-top: 0.25rem;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+      padding: 0.65rem 1.35rem;
+      border-radius: 999px;
+      border: none;
+      background: #00b894;
+      color: #ffffff;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 10px 24px rgba(0, 184, 148, 0.35);
+      margin-top: 0.3rem;
+    }
+    .btn:hover {
+      background: #02a184;
+      box-shadow: 0 12px 26px rgba(0, 184, 148, 0.4);
+      transform: translateY(-1px);
+    }
+    .btn:disabled {
+      opacity: 0.65;
+      cursor: default;
+    }
+    .status {
+      margin-top: 0.8rem;
+      font-size: 0.83rem;
+    }
+    .status-error {
+      background: var(--danger-bg);
+      color: var(--danger-text);
+      border-radius: 10px;
+      padding: 0.65rem 0.75rem;
+    }
+    .status-ok {
+      color: #047857;
+    }
+    .legs-list {
+      margin-top: 0.5rem;
+      border-top: 1px solid #e5e7eb;
+      padding-top: 0.6rem;
+      max-height: 420px;
+      overflow-y: auto;
+      font-size: 0.86rem;
+    }
+    .leg {
+      border-radius: 10px;
+      border: 1px solid #e5e7eb;
+      padding: 0.6rem 0.65rem;
+      margin-bottom: 0.75rem;
+      background: #f9fafb;
+    }
+    .leg-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 0.3rem;
+    }
+    .leg-title {
+      font-weight: 600;
+      color: #111827;
+      font-size: 0.92rem;
+    }
+    .pill {
+      padding: 0.05rem 0.55rem;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .pill-safe {
+      background: var(--safe-bg);
+      color: var(--safe-text);
+    }
+    .pill-risk {
+      background: #fef3c7;
+      color: #92400e;
+    }
+    .leg-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem 0.8rem;
+      font-size: 0.78rem;
+      color: #4b5563;
+      margin-bottom: 0.3rem;
+    }
+    .bridges-summary {
+      font-size: 0.78rem;
+      color: #4b5563;
+    }
+    .bridges-summary strong {
+      font-weight: 600;
+    }
+    footer {
+      margin-top: 1.3rem;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
   </style>
 </head>
-
 <body>
-<div class="page">
-  <div class="card">
-    <h2>Build HGV Route</h2>
-    <form id="route-form">
-      <label>Depot postcode</label>
-      <input id="depot" value="LS270BN" />
-
-      <label>Vehicle height (m)</label>
-      <input id="height" type="number" step="0.1" value="4.0" />
-
-      <label>Delivery postcodes (one per line)</label>
-      <textarea id="stops">HD5 0RL</textarea>
-
-      <button id="generate-btn">Generate</button>
-      <div id="status"></div>
-    </form>
+  <div class="hero">
+    <div class="hero-inner">
+      <div class="brand-row">
+        <div class="brand-logo">🛣️</div>
+        <div class="brand-title">RouteSafe AI</div>
+      </div>
+      <h1>Build a safe HGV route</h1>
+      <p>Keep your drop order – RouteSafe AI checks each leg for low bridges using ORS + a UK bridge dataset.</p>
+      <div class="version">Prototype v0.6 | Internal Use Only</div>
+    </div>
   </div>
 
-  <div class="card">
-    <h2>Route legs</h2>
-    <div id="legs-container"></div>
+  <div class="page">
+    <div class="layout">
+      <div class="card">
+        <h2>Route details</h2>
+        <p class="card-subtitle">Enter depot, height and postcodes in order.</p>
+        <form id="route-form">
+          <div class="field">
+            <label>Depot postcode</label>
+            <input id="depot" type="text" value="LS270BN" />
+          </div>
+          <div class="field">
+            <label>Vehicle / trailer height (m)</label>
+            <input id="height" type="number" step="0.1" value="4.0" />
+            <div class="hint">Full running height.</div>
+          </div>
+          <div class="field">
+            <label>Delivery postcodes in order</label>
+            <textarea id="stops">HD5 0RL</textarea>
+            <div class="hint">One postcode per line.</div>
+          </div>
+          <button class="btn" id="generate-btn">Generate safe legs</button>
+          <div id="status" class="status"></div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Route legs</h2>
+        <p class="card-subtitle">Each leg checked for low bridges.</p>
+        <div id="legs-container" class="legs-list">
+          <div class="hint">Enter route on the left and click <strong>Generate</strong>.</div>
+        </div>
+      </div>
+    </div>
+
+    <footer>Data source: OpenRouteService + internal UK low bridge dataset.</footer>
   </div>
-</div>
 
-<!-- Leaflet JS -->
-<script
-  src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-  integrity="sha256-o9N1j7kGIC3bJlP2G8VHx0LhQv0vM1sM/5p3pqtIDJk="
-  crossorigin=""></script>
+  <script>
+    const BACKEND_URL = "/api/route";
 
-<script>
-const BACKEND_URL = "/api/route";// ---------------------------------------------------------------
-// JS helpers
-// ---------------------------------------------------------------
+    const form = document.getElementById("route-form");
+    const statusEl = document.getElementById("status");
+    const legsContainer = document.getElementById("legs-container");
+    const generateBtn = document.getElementById("generate-btn");
 
-function setStatus(msg, error=false) {
-    const st = document.getElementById("status");
-    st.textContent = msg;
-    st.style.color = error ? "red" : "green";
-}
-
-function renderLegMap(geometry, mapId) {
-    if (!geometry || !geometry.length) return;
-
-    // Convert ORS [[lon,lat], ...] → Leaflet [lat,lon]
-    const latlngs = geometry.map(p => [p[1], p[0]]);
-
-    const map = L.map(mapId, { zoomControl:false });
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-    }).addTo(map);
-
-    const poly = L.polyline(latlngs, { color:"#0f62fe", weight:4 }).addTo(map);
-    map.fitBounds(poly.getBounds(), { padding:[12,12] });
-}
-
-function renderLegs(legs) {
-    const container = document.getElementById("legs-container");
-    container.innerHTML = "";
-
-    if (!legs || !legs.length) {
-        container.innerHTML = "<p>No legs returned.</p>";
+    function setStatus(msg, type = "info") {
+      if (!msg) {
+        statusEl.textContent = "";
+        statusEl.className = "status";
         return;
+      }
+      statusEl.textContent = msg;
+      statusEl.className =
+        type === "error" ? "status status-error" : "status status-ok";
     }
 
-    legs.forEach((leg, idx) => {
-        const wrap = document.createElement("div");
-        wrap.style.border = "1px solid #ddd";
-        wrap.style.padding = "10px";
-        wrap.style.borderRadius = "10px";
-        wrap.style.marginBottom = "15px";
+    function renderLegs(legs) {
+      legsContainer.innerHTML = "";
+      if (!legs || !legs.length) {
+        legsContainer.innerHTML =
+          '<div class="hint">No legs returned from backend.</div>';
+        return;
+      }
+      legs.forEach((leg, idx) => {
+        const bridges = leg.low_bridges || [];
+        const risky = bridges.length > 0;
 
-        const risky = leg.low_bridges && leg.low_bridges.length > 0;
+        const wrapper = document.createElement("div");
+        wrapper.className = "leg";
 
-        wrap.innerHTML = `
-            <h3>Leg ${idx+1}: ${leg.from_postcode} → ${leg.to_postcode}</h3>
-            <div>
-                <span>Distance: ${leg.distance_km} km</span><br>
-                <span>Time: ${leg.duration_min} min</span><br>
-                <span>Vehicle height: ${leg.vehicle_height_m} m</span><br>
-                <span class="${risky ? "pill-risk" : "pill-safe"}">
-                    ${risky ? "LOW BRIDGE RISK" : "HGV SAFE"}
-                </span>
-            </div>
+        const header = document.createElement("div");
+        header.className = "leg-header";
+
+        const title = document.createElement("div");
+        title.className = "leg-title";
+        title.textContent = `Leg ${idx + 1}: ${leg.from_postcode} → ${leg.to_postcode}`;
+
+        const pill = document.createElement("div");
+        pill.className = "pill " + (risky ? "pill-risk" : "pill-safe");
+        pill.textContent = risky ? "LOW BRIDGE(S)" : "HGV SAFE";
+
+        header.appendChild(title);
+        header.appendChild(pill);
+
+        const meta = document.createElement("div");
+        meta.className = "leg-meta";
+        meta.innerHTML = `
+          <span>Distance: ${leg.distance_km} km</span>
+          <span>Time: ${leg.duration_min} min</span>
+          <span>Vehicle height: ${leg.vehicle_height_m} m</span>
         `;
 
-        // Map container
-        const mapId = `map-${idx}`;
-        const mapDiv = document.createElement("div");
-        mapDiv.className = "leg-map";
-        mapDiv.id = mapId;
-        wrap.appendChild(mapDiv);
-
-        container.appendChild(wrap);
-
-        // Draw map
-        if (leg.geometry) {
-            renderLegMap(leg.geometry, mapId);
+        const bridgesSummary = document.createElement("div");
+        bridgesSummary.className = "bridges-summary";
+        if (!risky) {
+          bridgesSummary.textContent = "No low bridges on this leg.";
         } else {
-            mapDiv.innerHTML = "<p>No geometry for this leg.</p>";
+          const first = bridges[0];
+          const name = first.name || "Bridge";
+          const extra = bridges.length - 1;
+          const extraTxt = extra > 0 ? ` (+${extra} more)` : "";
+          bridgesSummary.innerHTML =
+            `<strong>${bridges.length}</strong> low bridge(s). ` +
+            `${name} at approx ${first.bridge_height_m.toFixed(3)} m${extraTxt}.`;
         }
-    });
-}
 
+        wrapper.appendChild(header);
+        wrapper.appendChild(meta);
+        wrapper.appendChild(bridgesSummary);
 
-// ---------------------------------------------------------------
-// Form handler
-// ---------------------------------------------------------------
-
-document.getElementById("route-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    setStatus("Loading…");
-
-    const depot = document.getElementById("depot").value.trim();
-    const height = parseFloat(document.getElementById("height").value);
-    const stops = document
-        .getElementById("stops")
-        .value
-        .split("\n")
-        .map(x => x.trim())
-        .filter(x => x.length > 0);
-
-    if (!depot || stops.length === 0) {
-        setStatus("Enter depot + at least one stop", true);
-        return;
+        legsContainer.appendChild(wrapper);
+      });
     }
 
-    try {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const depot = document.getElementById("depot").value.trim();
+      const height = parseFloat(document.getElementById("height").value);
+      const stops = document
+        .getElementById("stops")
+        .value.split("\\n")
+        .map((x) => x.trim())
+        .filter((x) => x.length > 0);
+
+      if (!depot || stops.length === 0) {
+        setStatus("Enter depot + at least one postcode.", "error");
+        return;
+      }
+      if (!height || height <= 0) {
+        setStatus("Vehicle height must be a positive number in metres.", "error");
+        return;
+      }
+
+      setStatus("Contacting backend…");
+      generateBtn.disabled = true;
+
+      try {
         const resp = await fetch(BACKEND_URL, {
-            method:"POST",
-            headers:{ "Content-Type":"application/json" },
-            body: JSON.stringify({
-                depot_postcode: depot,
-                vehicle_height_m: height,
-                stops: stops
-            })
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            depot_postcode: depot,
+            vehicle_height_m: height,
+            stops: stops,
+          }),
         });
 
         const text = await resp.text();
@@ -241,185 +483,256 @@ document.getElementById("route-form").addEventListener("submit", async (e) => {
         try { data = JSON.parse(text); } catch {}
 
         if (!resp.ok) {
-            setStatus(data?.detail || "Backend error", true);
-            return;
+          const errMsg =
+            (data && (data.detail || data.message)) ||
+            `Status ${resp.status}`;
+          throw new Error(errMsg);
         }
 
         renderLegs(data.legs);
-        setStatus("Route generated.");
-    }
-    catch(err) {
+        setStatus("Route generated successfully.");
+      } catch (err) {
         console.error(err);
-        setStatus("Network or backend error.", true);
-    }
-});
-</script>
-
+        setStatus("Backend error: " + (err.message || err), "error");
+        legsContainer.innerHTML =
+          '<div class="hint">No results – backend returned an error.</div>';
+      } finally {
+        generateBtn.disabled = false;
+      }
+    });
+  </script>
 </body>
 </html>
 """
+
 # -------------------------------------------------------------------
-# ORS Helpers
+# ORS helpers (no geometry requested)
 # -------------------------------------------------------------------
 
 def geocode_postcode(postcode: str) -> Tuple[float, float]:
-    """Return (lat, lon)."""
+    """Geocode a UK postcode using ORS. Returns (lat, lon)."""
     if not ORS_API_KEY:
-        raise HTTPException(500, "ORS_API_KEY missing")
+        raise HTTPException(
+            status_code=500,
+            detail="ORS_API_KEY is not configured on the server.",
+        )
+
+    text = postcode.strip().upper()
+    if not text:
+        raise HTTPException(
+            status_code=400, detail="Empty postcode supplied for geocoding."
+        )
 
     url = "https://api.openrouteservice.org/geocode/search"
     params = {
         "api_key": ORS_API_KEY,
-        "text": postcode,
+        "text": text,
         "size": 1,
         "boundary.country": "GB",
     }
 
-    r = requests.get(url, params=params, timeout=20)
-    if r.status_code != 200:
-        raise HTTPException(502, f"Geocode failed: {r.text[:200]}")
+    try:
+        resp = requests.get(url, params=params, timeout=20)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Error calling ORS geocoding for '{text}': {exc}",
+        )
 
-    data = r.json()
-    feats = data.get("features", [])
-    if not feats:
-        raise HTTPException(400, f"No result for postcode {postcode}")
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"ORS geocoding failed for '{text}' "
+                f"(status {resp.status_code}): {resp.text[:300]}"
+            ),
+        )
 
-    lon, lat = feats[0]["geometry"]["coordinates"]
+    data = resp.json()
+    features = data.get("features") or []
+    if not features:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No geocoding result found for postcode '{text}'.",
+        )
+
+    coords = features[0]["geometry"]["coordinates"]  # [lon, lat]
+    lon, lat = coords[0], coords[1]
     return float(lat), float(lon)
 
 
-def _extract_summary(data: Dict[str, Any], raw: str) -> Dict[str, Any]:
-    """Extract distance, duration, geometry from ORS."""
-    try:
-        if "routes" in data:
-            r0 = data["routes"][0]
-            summary = r0["summary"]
-            geom = r0.get("geometry")
-            coords = geom.get("coordinates") if isinstance(geom, dict) else geom
-        elif "features" in data:
-            f0 = data["features"][0]
-            summary = f0["properties"]["summary"]
-            geom = f0.get("geometry")
-            coords = geom.get("coordinates") if isinstance(geom, dict) else geom
-        else:
-            raise KeyError("No routes or features")
-    except Exception as e:
+def get_hgv_route_metrics(
+    start_lon: float,
+    start_lat: float,
+    end_lon: float,
+    end_lat: float,
+) -> Dict[str, float]:
+    """Call ORS driving-hgv, falling back to driving-car. Only summary, no geometry."""
+    if not ORS_API_KEY:
         raise HTTPException(
-            502,
-            f"Unexpected ORS routing format: {e} | payload: {raw[:200]}"
+            status_code=500,
+            detail="ORS_API_KEY is not configured on the server.",
         )
 
-    return {
-        "distance_km": round(float(summary["distance"]) / 1000, 2),
-        "duration_min": round(float(summary["duration"]) / 60, 1),
-        "geometry": coords,
-    }
+    def call_ors(profile: str):
+        url = f"https://api.openrouteservice.org/v2/directions/{profile}"
+        headers = {
+            "Authorization": ORS_API_KEY,
+            "Content-Type": "application/json",
+        }
+        body = {"coordinates": [[start_lon, start_lat], [end_lon, end_lat]]}
+        resp = requests.post(url, json=body, headers=headers, timeout=25)
+        return profile, resp
 
-
-def get_route_metrics(start_lon, start_lat, end_lon, end_lat) -> Dict[str, Any]:
-    """Call ORS driving-hgv → fallback driving-car."""
-    if not ORS_API_KEY:
-        raise HTTPException(500, "ORS_API_KEY missing")
-
-    headers = {
-        "Authorization": ORS_API_KEY,
-        "Content-Type": "application/json",
-    }
-    body = {"coordinates": [[start_lon, start_lat], [end_lon, end_lat]]}
+    last_error_txt: str | None = None
 
     for profile in ["driving-hgv", "driving-car"]:
-        url = f"https://api.openrouteservice.org/v2/directions/{profile}"
-        r = requests.post(url, json=body, headers=headers, timeout=25)
+        profile_used, resp = call_ors(profile)
 
-        if r.status_code != 200:
+        if resp.status_code != 200:
+            last_error_txt = (
+                f"{profile_used} status {resp.status_code}: {resp.text[:300]}"
+            )
             continue
 
-        return _extract_summary(r.json(), r.text)
+        data = resp.json()
+        try:
+            if "routes" in data:
+                summary = data["routes"][0]["summary"]
+            elif "features" in data:
+                summary = data["features"][0]["properties"]["summary"]
+            else:
+                raise KeyError("No 'routes' or 'features' in ORS response")
+        except (KeyError, IndexError, TypeError) as e:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "Unexpected routing response from ORS: "
+                    f"{e} | payload: {resp.text[:300]}"
+                ),
+            )
+
+        distance_km = float(summary["distance"]) / 1000.0
+        duration_min = float(summary["duration"]) / 60.0
+
+        return {
+            "distance_km": round(distance_km, 2),
+            "duration_min": round(duration_min, 1),
+        }
 
     raise HTTPException(
-        502,
-        f"ORS failed for both HGV & CAR: {r.text[:200]}"
+        status_code=502,
+        detail=f"Routing failed via ORS: {last_error_txt or 'no response'}",
     )
 
 
 # -------------------------------------------------------------------
-# Routes
+# API endpoints
 # -------------------------------------------------------------------
 
 @app.get("/", response_class=HTMLResponse)
 def serve_ui():
-    return HTMLResponse(content=HTML_PAGE)
+    return HTMLResponse(content=HTML_PAGE, status_code=200)
 
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "service": "RouteSafe AI backend"}
 
 
 @app.post("/api/route", response_model=RouteResponse)
 def api_route(req: RouteRequest):
+    """Main entry point for the frontend."""
+    try:
+        if not ORS_API_KEY:
+            raise HTTPException(
+                status_code=500,
+                detail="ORS_API_KEY is not configured on the server.",
+            )
 
-    depot_pc = req.depot_postcode.strip().upper()
-    stops_clean = [s.strip().upper() for s in req.stops if s.strip()]
+        depot_pc = req.depot_postcode.strip().upper()
+        stops_clean = [s.strip().upper() for s in req.stops if s.strip()]
 
-    if not depot_pc:
-        raise HTTPException(400, "Depot missing")
+        if not depot_pc:
+            raise HTTPException(
+                status_code=400, detail="Depot postcode must not be empty."
+            )
+        if not stops_clean:
+            raise HTTPException(
+                status_code=400,
+                detail="At least one delivery postcode is required.",
+            )
+        if req.vehicle_height_m <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Vehicle height must be a positive number in metres.",
+            )
 
-    if not stops_clean:
-        raise HTTPException(400, "At least one stop required")
+        # Geocode all points
+        points: List[Tuple[float, float]] = []
+        postcodes: List[str] = []
 
-    # Geocode
-    points: List[Tuple[float, float]] = []
-    postcodes: List[str] = []
+        depot_lat, depot_lon = geocode_postcode(depot_pc)
+        points.append((depot_lat, depot_lon))
+        postcodes.append(depot_pc)
 
-    depot_lat, depot_lon = geocode_postcode(depot_pc)
-    points.append((depot_lat, depot_lon))
-    postcodes.append(depot_pc)
+        for pc in stops_clean:
+            lat, lon = geocode_postcode(pc)
+            points.append((lat, lon))
+            postcodes.append(pc)
 
-    for pc in stops_clean:
-        lat, lon = geocode_postcode(pc)
-        points.append((lat, lon))
-        postcodes.append(pc)
+        legs_out: List[Dict[str, Any]] = []
 
-    # Legs
-    legs_out: List[Dict[str, Any]] = []
+        for idx in range(len(points) - 1):
+            start_lat, start_lon = points[idx]
+            end_lat, end_lon = points[idx + 1]
 
-    for i in range(len(points) - 1):
-        start_lat, start_lon = points[i]
-        end_lat, end_lon = points[i + 1]
+            metrics = get_hgv_route_metrics(
+                start_lon=start_lon,
+                start_lat=start_lat,
+                end_lon=end_lon,
+                end_lat=end_lat,
+            )
 
-        # ORS main route
-        metrics = get_route_metrics(
-            start_lon, start_lat, end_lon, end_lat
+            # ---- LOW BRIDGE LOOKUP via BridgeEngine.check_leg ----
+            result = bridge_engine.check_leg(
+                start_lat=start_lat,
+                start_lon=start_lon,
+                end_lat=end_lat,
+                end_lon=end_lon,
+                vehicle_height_m=req.vehicle_height_m,
+            )
+
+            low_bridges: List[Dict[str, Any]] = []
+            if result.nearest_bridge is not None and result.near_height_limit:
+                low_bridges.append(
+                    {
+                        "name": None,
+                        "bridge_height_m": float(result.nearest_bridge.height_m),
+                        "distance_from_start_m": float(
+                            result.nearest_distance_m or 0.0
+                        ),
+                        "lat": float(result.nearest_bridge.lat),
+                        "lon": float(result.nearest_bridge.lon),
+                    }
+                )
+
+            leg = {
+                "from_postcode": postcodes[idx],
+                "to_postcode": postcodes[idx + 1],
+                "distance_km": metrics["distance_km"],
+                "duration_min": metrics["duration_min"],
+                "vehicle_height_m": req.vehicle_height_m,
+                "low_bridges": low_bridges,
+            }
+            legs_out.append(leg)
+
+        return {"legs": legs_out}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected server error: {e}",
         )
-
-        # Bridge check (nearest)
-        result = bridge_engine.check_leg(
-            start_lat=start_lat,
-            start_lon=start_lon,
-            end_lat=end_lat,
-            end_lon=end_lon,
-            vehicle_height_m=req.vehicle_height_m
-        )
-
-        low_bridges = []
-        if result.nearest_bridge:
-            low_bridges.append({
-                "name": None,
-                "bridge_height_m": float(result.nearest_bridge.height_m),
-                "distance_from_start_m": float(result.nearest_distance_m or 0),
-                "lat": float(result.nearest_bridge.lat),
-                "lon": float(result.nearest_bridge.lon),
-            })
-
-        legs_out.append({
-            "from_postcode": postcodes[i],
-            "to_postcode": postcodes[i + 1],
-            "distance_km": metrics["distance_km"],
-            "duration_min": metrics["duration_min"],
-            "vehicle_height_m": req.vehicle_height_m,
-            "low_bridges": low_bridges,
-            "geometry": metrics["geometry"],
-        })
-
-    return {"legs": legs_out}
