@@ -10,7 +10,6 @@ from pydantic import BaseModel
 
 from bridge_engine import BridgeEngine
 
-
 # -------------------------------------------------------------------
 # Config
 # -------------------------------------------------------------------
@@ -25,11 +24,13 @@ BRIDGE_CSV_PATH = os.path.join(BASE_DIR, "bridge_heights_clean.csv")
 
 bridge_engine = BridgeEngine(BRIDGE_CSV_PATH)
 
+EARTH_RADIUS_M = 6371000.0
+
 # -------------------------------------------------------------------
 # FastAPI setup
 # -------------------------------------------------------------------
 
-app = FastAPI(title="RouteSafe AI Backend", version="0.5")
+app = FastAPI(title="RouteSafe AI Backend", version="0.4")
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,18 +58,21 @@ class BridgeOut(BaseModel):
     lon: float
 
 
+class RouteVariantOut(BaseModel):
+    distance_km: float
+    duration_min: float
+    # list of [lon, lat] pairs from ORS
+    geometry: List[List[float]] | None = None
+
+
 class RouteLegOut(BaseModel):
     from_postcode: str
     to_postcode: str
-    distance_km: float
-    duration_min: float
     vehicle_height_m: float
-    low_bridges: List[BridgeOut]
-    geometry: List[List[float]] | None = None
     has_low_bridges: bool
-    alt_distance_km: float | None = None
-    alt_duration_min: float | None = None
-    alt_geometry: List[List[float]] | None = None
+    low_bridges: List[BridgeOut]
+    main: RouteVariantOut
+    alternative: RouteVariantOut | None = None
 
 
 class RouteResponse(BaseModel):
@@ -76,7 +80,7 @@ class RouteResponse(BaseModel):
 
 
 # -------------------------------------------------------------------
-# UI HTML (Leaflet map + alt route display)
+# UI HTML (with Leaflet + main/alt route cards)
 # -------------------------------------------------------------------
 
 HTML_PAGE = """
@@ -103,9 +107,11 @@ HTML_PAGE = """
       --card-bg: #ffffff;
       --border: #d1d5db;
       --muted: #6b7280;
-      --danger-bg: #fee2e2;
+      --danger-bg-soft: #fee2e2;
+      --danger-border: #fecaca;
       --danger-text: #b91c1c;
-      --safe-bg: #ecfdf5;
+      --safe-bg-soft: #ecfdf5;
+      --safe-border: #bbf7d0;
       --safe-text: #047857;
       --radius-lg: 16px;
       --shadow-card: 0 14px 35px rgba(15, 35, 83, 0.14);
@@ -263,7 +269,7 @@ HTML_PAGE = """
       font-size: 0.83rem;
     }
     .status-error {
-      background: var(--danger-bg);
+      background: var(--danger-bg-soft);
       color: var(--danger-text);
       border-radius: 10px;
       padding: 0.65rem 0.75rem;
@@ -280,21 +286,23 @@ HTML_PAGE = """
       font-size: 0.86rem;
     }
     .leg {
-      border-radius: 10px;
+      border-radius: 12px;
       border: 1px solid #e5e7eb;
-      padding: 0.6rem 0.65rem;
-      margin-bottom: 0.75rem;
+      padding: 0.7rem 0.75rem 0.9rem;
+      margin-bottom: 0.9rem;
       background: #f9fafb;
     }
     .leg-header {
       display: flex;
       justify-content: space-between;
-      margin-bottom: 0.3rem;
+      margin-bottom: 0.35rem;
+      gap: 0.5rem;
+      align-items: center;
     }
     .leg-title {
       font-weight: 600;
       color: #111827;
-      font-size: 0.92rem;
+      font-size: 0.95rem;
     }
     .pill {
       padding: 0.05rem 0.55rem;
@@ -302,6 +310,7 @@ HTML_PAGE = """
       font-size: 0.7rem;
       font-weight: 600;
       text-transform: uppercase;
+      white-space: nowrap;
     }
     .pill-safe {
       background: #d1fae5;
@@ -317,44 +326,63 @@ HTML_PAGE = """
       gap: 0.4rem 0.8rem;
       font-size: 0.78rem;
       color: #4b5563;
-      margin-bottom: 0.3rem;
+      margin-bottom: 0.25rem;
     }
     .bridges-summary {
       font-size: 0.78rem;
       color: #4b5563;
-      margin-bottom: 0.35rem;
+      margin-bottom: 0.4rem;
     }
     .bridges-summary strong {
       font-weight: 600;
     }
-    .leg-map {
-      height: 210px;
-      border-radius: 10px;
-      overflow: hidden;
-      border: 1px solid #e5e7eb;
+
+    .route-panel {
+      border-radius: 12px;
+      padding: 0.5rem 0.6rem 0.6rem;
+      margin-bottom: 0.55rem;
     }
-    .route-variant {
-      border-radius: 10px;
-      padding: 0.45rem 0.55rem 0.55rem;
-      margin-top: 0.4rem;
-    }
-    .route-variant h4 {
-      margin: 0 0 0.25rem;
-      font-size: 0.8rem;
-      font-weight: 600;
+    .route-panel-header {
       display: flex;
       justify-content: space-between;
-      align-items: center;
+      align-items: baseline;
+      gap: 0.5rem;
+      margin-bottom: 0.25rem;
+      font-size: 0.8rem;
+      font-weight: 600;
     }
-    .route-variant small {
+    .route-panel-sub {
       font-size: 0.75rem;
       color: var(--muted);
     }
-    .variant-risk {
-      background: var(--danger-bg);
+    .route-panel-meta {
+      font-size: 0.78rem;
+      margin-bottom: 0.3rem;
     }
-    .variant-safe {
-      background: var(--safe-bg);
+
+    .route-panel-main-risk {
+      background: var(--danger-bg-soft);
+      border: 1px solid var(--danger-border);
+      color: var(--danger-text);
+    }
+    .route-panel-main-safe {
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      color: #1d4ed8;
+    }
+    .route-panel-alt {
+      background: var(--safe-bg-soft);
+      border: 1px solid var(--safe-border);
+      color: var(--safe-text);
+    }
+
+    .leg-map {
+      margin-top: 0.35rem;
+      height: 160px;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid #e5e7eb;
+      background: #f9fafb;
     }
     footer {
       margin-top: 1.3rem;
@@ -372,7 +400,7 @@ HTML_PAGE = """
       </div>
       <h1>Build a safe HGV route</h1>
       <p>Keep your drop order – RouteSafe AI checks each leg for low bridges using ORS + a UK bridge dataset.</p>
-      <div class="version">Prototype v0.5 | Internal Use Only</div>
+      <div class="version">Prototype v0.4 | Internal Use Only</div>
     </div>
   </div>
 
@@ -438,12 +466,12 @@ HTML_PAGE = """
     }
 
     function renderLegMap(geometry, mapId) {
-      const el = document.getElementById(mapId);
-      if (!el) return;
-
       if (!geometry || !geometry.length || typeof L === "undefined") {
-        el.innerHTML =
-          '<div class="hint" style="padding:0.6rem;">No map data available for this leg.</div>';
+        const el = document.getElementById(mapId);
+        if (el) {
+          el.innerHTML =
+            '<div class="hint" style="padding:0.6rem;">No map data available for this leg.</div>';
+        }
         return;
       }
       const latLngs = geometry.map(([lon, lat]) => [lat, lon]);
@@ -468,10 +496,8 @@ HTML_PAGE = """
           '<div class="hint">No legs returned from backend.</div>';
         return;
       }
-      legs.forEach((leg, idx) => {
-        const bridges = leg.low_bridges || [];
-        const risky = leg.has_low_bridges;
 
+      legs.forEach((leg, idx) => {
         const wrapper = document.createElement("div");
         wrapper.className = "leg";
 
@@ -480,85 +506,117 @@ HTML_PAGE = """
         const title = document.createElement("div");
         title.className = "leg-title";
         title.textContent = `Leg ${idx + 1}: ${leg.from_postcode} → ${leg.to_postcode}`;
+
         const pill = document.createElement("div");
-        pill.className = "pill " + (risky ? "pill-risk" : "pill-safe");
-        pill.textContent = risky ? "LOW BRIDGE(S)" : "HGV SAFE";
+        pill.className = "pill " + (leg.has_low_bridges ? "pill-risk" : "pill-safe");
+        pill.textContent = leg.has_low_bridges ? "LOW BRIDGE(S)" : "HGV SAFE";
+
         header.appendChild(title);
         header.appendChild(pill);
 
         const meta = document.createElement("div");
         meta.className = "leg-meta";
         meta.innerHTML = `
-          <span>Distance: ${leg.distance_km} km</span>
-          <span>Time: ${leg.duration_min} min</span>
+          <span>Distance: ${leg.main.distance_km} km</span>
+          <span>Time: ${leg.main.duration_min} min</span>
           <span>Vehicle height: ${leg.vehicle_height_m} m</span>
         `;
 
         const bridgesSummary = document.createElement("div");
         bridgesSummary.className = "bridges-summary";
-        if (!risky) {
-          bridgesSummary.textContent = "No low bridges on this leg.";
+        if (!leg.has_low_bridges || !leg.low_bridges || !leg.low_bridges.length) {
+          bridgesSummary.textContent = "No low bridges detected on this leg.";
         } else {
-          const first = bridges[0];
-          const name = first?.name || "Bridge";
-          const extra = (bridges.length || 0) - 1;
+          const first = leg.low_bridges[0];
+          const extra = leg.low_bridges.length - 1;
           const extraTxt = extra > 0 ? ` (+${extra} more)` : "";
           bridgesSummary.innerHTML =
-            `<strong>${bridges.length}</strong> low bridge(s). ` +
-            `${name} at approx ${first.bridge_height_m} m${extraTxt}.`;
+            `<strong>${leg.low_bridges.length}</strong> low bridge(s). ` +
+            `Bridge at approx ${first.bridge_height_m} m${extraTxt}.`;
         }
 
         wrapper.appendChild(header);
         wrapper.appendChild(meta);
         wrapper.appendChild(bridgesSummary);
 
-        if (!risky || !leg.alt_geometry) {
-          const variant = document.createElement("div");
-          variant.className = "route-variant " + (risky ? "variant-risk" : "variant-safe");
-          variant.innerHTML = `
-            <h4>${risky ? "Main route (via low bridge area)" : "Main route"}<span></span></h4>
-          `;
-          const mapDiv = document.createElement("div");
-          mapDiv.className = "leg-map";
-          const mapId = `leg-map-${idx}-main`;
-          mapDiv.id = mapId;
-          variant.appendChild(mapDiv);
-          wrapper.appendChild(variant);
-          legsContainer.appendChild(wrapper);
-          renderLegMap(leg.geometry, mapId);
-        } else {
-          const riskVariant = document.createElement("div");
-          riskVariant.className = "route-variant variant-risk";
-          riskVariant.innerHTML = `
-            <h4>Route via low bridge area<small>Use only if you know the local restriction.</small></h4>
-          `;
-          const riskMap = document.createElement("div");
-          riskMap.className = "leg-map";
-          const riskId = `leg-map-${idx}-risk`;
-          riskMap.id = riskId;
-          riskVariant.appendChild(riskMap);
+        // MAIN ROUTE PANEL
+        const mainPanel = document.createElement("div");
+        mainPanel.className =
+          "route-panel " +
+          (leg.has_low_bridges ? "route-panel-main-risk" : "route-panel-main-safe");
 
-          const altVariant = document.createElement("div");
-          altVariant.className = "route-variant variant-safe";
-          altVariant.innerHTML = `
-            <h4>Alternative route (bubble avoid)<small>Designed to steer clear of the low bridge bubble.</small></h4>
-            <div class="hint">
-              Distance: ${leg.alt_distance_km} km · Time: ${leg.alt_duration_min} min
-            </div>
-          `;
-          const altMap = document.createElement("div");
-          altMap.className = "leg-map";
-          const altId = `leg-map-${idx}-alt`;
-          altMap.id = altId;
-          altVariant.appendChild(altMap);
+        const mainHeader = document.createElement("div");
+        mainHeader.className = "route-panel-header";
+        const mainTitle = document.createElement("div");
+        mainTitle.textContent = leg.has_low_bridges
+          ? "Main route (via low bridge area)"
+          : "Main route";
+        const mainSub = document.createElement("div");
+        mainSub.className = "route-panel-sub";
+        mainSub.textContent = leg.has_low_bridges
+          ? "Use only if you know the local restriction."
+          : "Standard ORS HGV route.";
+        mainHeader.appendChild(mainTitle);
+        mainHeader.appendChild(mainSub);
 
-          wrapper.appendChild(riskVariant);
-          wrapper.appendChild(altVariant);
-          legsContainer.appendChild(wrapper);
+        const mainMeta = document.createElement("div");
+        mainMeta.className = "route-panel-meta";
+        mainMeta.textContent = `Distance: ${leg.main.distance_km} km · Time: ${leg.main.duration_min} min`;
 
-          renderLegMap(leg.geometry, riskId);
-          renderLegMap(leg.alt_geometry, altId);
+        const mainMapId = `leg-${idx}-main-map`;
+        const mainMapDiv = document.createElement("div");
+        mainMapDiv.className = "leg-map";
+        mainMapDiv.id = mainMapId;
+
+        mainPanel.appendChild(mainHeader);
+        mainPanel.appendChild(mainMeta);
+        mainPanel.appendChild(mainMapDiv);
+
+        wrapper.appendChild(mainPanel);
+
+        // ALTERNATIVE ROUTE PANEL (only when we have low bridges + alt)
+        if (leg.has_low_bridges && leg.alternative) {
+          const altPanel = document.createElement("div");
+          altPanel.className = "route-panel route-panel-alt";
+
+          const altHeader = document.createElement("div");
+          altHeader.className = "route-panel-header";
+          const altTitle = document.createElement("div");
+          altTitle.textContent = "Alternative route (bubble avoid)";
+          const altSub = document.createElement("div");
+          altSub.className = "route-panel-sub";
+          altSub.textContent =
+            "Designed to steer clear of the low bridge bubble.";
+          altHeader.appendChild(altTitle);
+          altHeader.appendChild(altSub);
+
+          const altMeta = document.createElement("div");
+          altMeta.className = "route-panel-meta";
+          altMeta.textContent = `Distance: ${leg.alternative.distance_km} km · Time: ${leg.alternative.duration_min} min`;
+
+          const altMapId = `leg-${idx}-alt-map`;
+          const altMapDiv = document.createElement("div");
+          altMapDiv.className = "leg-map";
+          altMapDiv.id = altMapId;
+
+          altPanel.appendChild(altHeader);
+          altPanel.appendChild(altMeta);
+          altPanel.appendChild(altMapDiv);
+
+          wrapper.appendChild(altPanel);
+
+          // draw alternative map
+          setTimeout(() => {
+            renderLegMap(leg.alternative.geometry, altMapId);
+          }, 0);
         }
+
+        legsContainer.appendChild(wrapper);
+
+        // draw main map
+        setTimeout(() => {
+          renderLegMap(leg.main.geometry, mainMapId);
+        }, 0);
       });
     }
 
@@ -679,58 +737,32 @@ def geocode_postcode(postcode: str) -> Tuple[float, float]:
     return float(lat), float(lon)
 
 
-# --- Polyline Decoder ---
-def decode_polyline(encoded: str) -> List[List[float]]:
-    """Decodes an encoded polyline string into [[lon, lat], ...]."""
-    coords: List[List[float]] = []
-    index = 0
-    lat = 0
-    lng = 0
-    length = len(encoded)
-
-    while index < length:
-        result = 0
-        shift = 0
-        while True:
-            b = ord(encoded[index]) - 63
-            index += 1
-            result |= (b & 0x1F) << shift
-            shift += 5
-            if b < 0x20:
-                break
-        dlat = ~(result >> 1) if (result & 1) else (result >> 1)
-        lat += dlat
-
-        result = 0
-        shift = 0
-        while True:
-            b = ord(encoded[index]) - 63
-            index += 1
-            result |= (b & 0x1F) << shift
-            shift += 5
-            if b < 0x20:
-                break
-        dlng = ~(result >> 1) if (result & 1) else (result >> 1)
-        lng += dlng
-
-        coords.append([lng / 1e5, lat / 1e5])
-
-    return coords
-
-
 def _extract_summary_from_ors(data: Dict[str, Any], raw_text: str) -> Dict[str, Any]:
-    """Normalise ORS JSON into distance_km, duration_min, geometry."""
+    """Normalise ORS JSON/GeoJSON into distance_km + duration_min + geometry."""
+    summary: Dict[str, Any] | None = None
+    geometry_coords = None
     try:
-        if "routes" not in data:
-            raise KeyError("No 'routes' in ORS response")
-        route0 = data["routes"][0]
-        summary = route0["summary"]
-        geom = route0.get("geometry")
-        if isinstance(geom, str):
-            geometry_coords = decode_polyline(geom)
+        if "routes" in data:
+            # JSON directions format (not used now, but kept for safety)
+            route0 = data["routes"][0]
+            summary = route0["summary"]
+            geom = route0.get("geometry")
+            if isinstance(geom, dict):
+                geometry_coords = geom.get("coordinates")
+            else:
+                geometry_coords = geom
+        elif "features" in data:
+            # GeoJSON directions format
+            feat0 = data["features"][0]
+            summary = feat0["properties"]["summary"]
+            geom = feat0.get("geometry")
+            if isinstance(geom, dict):
+                geometry_coords = geom.get("coordinates")
+            else:
+                geometry_coords = geom
         else:
-            geometry_coords = geom
-    except Exception as e:
+            raise KeyError("Neither 'routes' nor 'features' present")
+    except (KeyError, IndexError, TypeError) as e:
         raise HTTPException(
             status_code=502,
             detail=(
@@ -749,24 +781,35 @@ def _extract_summary_from_ors(data: Dict[str, Any], raw_text: str) -> Dict[str, 
     }
 
 
-def _call_ors_route(
-    start_lon: float,
-    start_lat: float,
-    end_lon: float,
-    end_lat: float,
-    profile: str,
-    options: Optional[Dict[str, Any]] = None,
-) -> requests.Response:
-    url = f"https://api.openrouteservice.org/v2/directions/{profile}"
-    headers = {"Authorization": ORS_API_KEY}
-    body: Dict[str, Any] = {
-        "coordinates": [[start_lon, start_lat], [end_lon, end_lat]],
-        "instructions": False,
+def _make_avoid_polygon(lon: float, lat: float, radius_m: float) -> Dict[str, Any]:
+    """
+    Build a simple square polygon (lon/lat) around a centre point
+    to use as ORS avoid_polygons geometry.
+    """
+    if radius_m <= 0:
+        raise ValueError("radius_m must be positive")
+
+    lat_rad = math.radians(lat)
+    d_lat = (radius_m / EARTH_RADIUS_M) * (180.0 / math.pi)
+    d_lon = (radius_m / (EARTH_RADIUS_M * math.cos(lat_rad))) * (180.0 / math.pi)
+
+    lon_min = lon - d_lon
+    lon_max = lon + d_lon
+    lat_min = lat - d_lat
+    lat_max = lat + d_lat
+
+    coords = [
+        [lon_min, lat_min],
+        [lon_max, lat_min],
+        [lon_max, lat_max],
+        [lon_min, lat_max],
+        [lon_min, lat_min],
+    ]
+
+    return {
+        "type": "Polygon",
+        "coordinates": [coords],
     }
-    if options:
-        body["options"] = options
-    resp = requests.post(url, json=body, headers=headers, timeout=25)
-    return resp
 
 
 def get_hgv_route_metrics(
@@ -774,111 +817,51 @@ def get_hgv_route_metrics(
     start_lat: float,
     end_lon: float,
     end_lat: float,
+    avoid_polygon: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Call ORS driving-hgv, falling back to driving-car if needed."""
+    """
+    Call ORS driving-hgv, falling back to driving-car if needed.
+    Requests GeoJSON so we get coordinates for mapping.
+    """
     if not ORS_API_KEY:
         raise HTTPException(
             status_code=500,
             detail="ORS_API_KEY is not configured on the server.",
         )
 
+    def call_ors(profile: str):
+        url = f"https://api.openrouteservice.org/v2/directions/{profile}/geojson"
+        headers = {
+            "Authorization": ORS_API_KEY,
+            "Content-Type": "application/json",
+        }
+        body: Dict[str, Any] = {
+            "coordinates": [[start_lon, start_lat], [end_lon, end_lat]],
+        }
+        if avoid_polygon is not None:
+            body["options"] = {"avoid_polygons": avoid_polygon}
+        resp = requests.post(url, json=body, headers=headers, timeout=25)
+        return profile, resp
+
     last_error_txt: str | None = None
 
     for profile in ["driving-hgv", "driving-car"]:
-        resp = _call_ors_route(start_lon, start_lat, end_lon, end_lat, profile)
+        profile_used, resp = call_ors(profile)
 
         if resp.status_code != 200:
             last_error_txt = (
-                f"{profile} status {resp.status_code}: {resp.text[:300]}"
+                f"{profile_used} status {resp.status_code}: {resp.text[:300]}"
             )
             continue
 
         raw_text = resp.text
         data: Dict[str, Any] = resp.json()
-        metrics = _extract_summary_from_ors(data, raw_text)
-
-        # Fallback geometry: straight line if ORS didn't give us one
-        if not metrics.get("geometry"):
-            metrics["geometry"] = [
-                [start_lon, start_lat],
-                [end_lon, end_lat],
-            ]
-        return metrics
+        return _extract_summary_from_ors(data, raw_text)
 
     raise HTTPException(
         status_code=502,
         detail=f"Routing failed via ORS: {last_error_txt or 'no response'}",
     )
-
-
-def get_hgv_route_metrics_avoiding_bridge(
-    start_lon: float,
-    start_lat: float,
-    end_lon: float,
-    end_lat: float,
-    bridge_lat: float,
-    bridge_lon: float,
-    buffer_m: float = 200.0,
-) -> Optional[Dict[str, Any]]:
-    """
-    Try to get an alternative route that avoids a small bubble
-    (square polygon) around the low bridge.
-    Returns None if ORS can't find a valid alternative.
-    """
-    if not ORS_API_KEY:
-        return None
-
-    dlat = buffer_m / 111320.0
-    cos_lat = math.cos(math.radians(bridge_lat))
-    if abs(cos_lat) < 1e-6:
-        cos_lat = 1e-6
-    dlon = buffer_m / (111320.0 * cos_lat)
-
-    poly_coords = [
-        [bridge_lon - dlon, bridge_lat - dlat],
-        [bridge_lon + dlon, bridge_lat - dlat],
-        [bridge_lon + dlon, bridge_lat + dlat],
-        [bridge_lon - dlon, bridge_lat + dlat],
-        [bridge_lon - dlon, bridge_lat - dlat],
-    ]
-
-    options = {
-        "avoid_polygons": {
-            "type": "Polygon",
-            "coordinates": [poly_coords],
-        }
-    }
-
-    last_error_txt: str | None = None
-
-    for profile in ["driving-hgv", "driving-car"]:
-        resp = _call_ors_route(
-            start_lon, start_lat, end_lon, end_lat, profile, options=options
-        )
-
-        if resp.status_code != 200:
-            last_error_txt = (
-                f"{profile} status {resp.status_code}: {resp.text[:300]}"
-            )
-            continue
-
-        raw_text = resp.text
-        data: Dict[str, Any] = resp.json()
-        try:
-            metrics = _extract_summary_from_ors(data, raw_text)
-        except HTTPException:
-            last_error_txt = "parse error on alternative"
-            continue
-
-        if not metrics.get("geometry"):
-            metrics["geometry"] = [
-                [start_lon, start_lat],
-                [end_lon, end_lat],
-            ]
-        return metrics
-
-    print(f"[RouteSafe] No alternative route found: {last_error_txt}")
-    return None
 
 
 # -------------------------------------------------------------------
@@ -936,19 +919,21 @@ def api_route(req: RouteRequest):
             points.append((lat, lon))
             postcodes.append(pc)
 
-        legs_out: List[Dict[str, Any]] = []
+        legs_out: List[RouteLegOut] = []
 
         for idx in range(len(points) - 1):
             start_lat, start_lon = points[idx]
             end_lat, end_lon = points[idx + 1]
 
-            metrics = get_hgv_route_metrics(
+            # MAIN METRICS
+            main_metrics = get_hgv_route_metrics(
                 start_lon=start_lon,
                 start_lat=start_lat,
                 end_lon=end_lon,
                 end_lat=end_lat,
             )
 
+            # LOW BRIDGE LOOKUP
             result = bridge_engine.check_leg(
                 start_lat=start_lat,
                 start_lon=start_lon,
@@ -957,46 +942,64 @@ def api_route(req: RouteRequest):
                 vehicle_height_m=req.vehicle_height_m,
             )
 
-            low_bridges: List[Dict[str, Any]] = []
-            if result.nearest_bridge is not None:
+            low_bridges: List[BridgeOut] = []
+            has_low = False
+
+            if result.nearest_bridge is not None and result.nearest_distance_m is not None:
+                has_low = True
                 low_bridges.append(
-                    {
-                        "name": None,
-                        "bridge_height_m": float(result.nearest_bridge.height_m),
-                        "distance_from_start_m": float(
-                            result.nearest_distance_m or 0.0
-                        ),
-                        "lat": float(result.nearest_bridge.lat),
-                        "lon": float(result.nearest_bridge.lon),
-                    }
+                    BridgeOut(
+                        name=None,
+                        bridge_height_m=float(result.nearest_bridge.height_m),
+                        distance_from_start_m=float(result.nearest_distance_m),
+                        lat=float(result.nearest_bridge.lat),
+                        lon=float(result.nearest_bridge.lon),
+                    )
                 )
 
-            alt_metrics: Optional[Dict[str, Any]] = None
-            if result.has_conflict and result.nearest_bridge is not None:
-                alt_metrics = get_hgv_route_metrics_avoiding_bridge(
-                    start_lon=start_lon,
-                    start_lat=start_lat,
-                    end_lon=end_lon,
-                    end_lat=end_lat,
-                    bridge_lat=result.nearest_bridge.lat,
-                    bridge_lon=result.nearest_bridge.lon,
-                    buffer_m=200.0,
-                )
+            # Build main variant
+            main_variant = RouteVariantOut(
+                distance_km=main_metrics["distance_km"],
+                duration_min=main_metrics["duration_min"],
+                geometry=main_metrics.get("geometry"),
+            )
 
-            leg = {
-                "from_postcode": postcodes[idx],
-                "to_postcode": postcodes[idx + 1],
-                "distance_km": metrics["distance_km"],
-                "duration_min": metrics["duration_min"],
-                "vehicle_height_m": req.vehicle_height_m,
-                "low_bridges": low_bridges,
-                "geometry": metrics.get("geometry"),
-                "has_low_bridges": bool(low_bridges),
-                "alt_distance_km": alt_metrics["distance_km"] if alt_metrics else None,
-                "alt_duration_min": alt_metrics["duration_min"] if alt_metrics else None,
-                "alt_geometry": alt_metrics.get("geometry") if alt_metrics else None,
-            }
-            legs_out.append(leg)
+            # Alternative route (avoid bubble around nearest bridge)
+            alt_variant: Optional[RouteVariantOut] = None
+            if has_low and low_bridges:
+                b = low_bridges[0]
+                try:
+                    avoid_poly = _make_avoid_polygon(
+                        lon=b.lon,
+                        lat=b.lat,
+                        radius_m=200.0,  # 200 m bubble – can tweak later
+                    )
+                    alt_metrics = get_hgv_route_metrics(
+                        start_lon=start_lon,
+                        start_lat=start_lat,
+                        end_lon=end_lon,
+                        end_lat=end_lat,
+                        avoid_polygon=avoid_poly,
+                    )
+                    alt_variant = RouteVariantOut(
+                        distance_km=alt_metrics["distance_km"],
+                        duration_min=alt_metrics["duration_min"],
+                        geometry=alt_metrics.get("geometry"),
+                    )
+                except HTTPException:
+                    # If ORS can't find an alternative, just skip alt instead of failing
+                    alt_variant = None
+
+            leg_out = RouteLegOut(
+                from_postcode=postcodes[idx],
+                to_postcode=postcodes[idx + 1],
+                vehicle_height_m=req.vehicle_height_m,
+                has_low_bridges=has_low,
+                low_bridges=low_bridges,
+                main=main_variant,
+                alternative=alt_variant,
+            )
+            legs_out.append(leg_out)
 
         return {"legs": legs_out}
 
@@ -1007,3 +1010,4 @@ def api_route(req: RouteRequest):
             status_code=500,
             detail=f"Unexpected server error: {e}",
         )
+```0
