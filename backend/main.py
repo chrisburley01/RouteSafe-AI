@@ -3,17 +3,18 @@
 # RouteSafe backend:
 # - Serves the SPA frontend from the /web folder
 # - Exposes /api/route for low-bridge-checked HGV route legs
+# - Request body is parsed manually to be robust to field-name changes.
 
 import os
 from pathlib import Path
-from typing import List
+from typing import List, Dict, Any
 from urllib.parse import urlencode, quote_plus
 
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from bridge_engine import BridgeEngine, BridgeCheckResult, Bridge
 
@@ -34,7 +35,7 @@ for c in WEB_CANDIDATES:
         break
 
 if WEB_DIR is None:
-    WEB_DIR = BASE_DIR  # fallback, but you *do* have /web so this shouldn't happen
+    WEB_DIR = BASE_DIR  # fallback – but you *do* have /web so this shouldn't happen
 
 # ---------------------------------------------------------------------------
 # External services config
@@ -48,15 +49,8 @@ ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-hgv
 ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
 
 # ---------------------------------------------------------------------------
-# Pydantic models
+# Response models (output only – we don't validate the input)
 # ---------------------------------------------------------------------------
-
-
-class RouteRequest(BaseModel):
-    # 🔴 IMPORTANT: match the existing frontend JSON keys
-    vehicle_height_m: float = Field(..., alias="vehicleHeight")
-    depot_postcode: str = Field(..., alias="depotPostcode")
-    delivery_postcodes: List[str] = Field(..., alias="deliveryPostcodes")
 
 
 class RouteLeg(BaseModel):
@@ -71,7 +65,7 @@ class RouteLeg(BaseModel):
     bridge_message: str
     safety_label: str
     google_maps_url: str
-    bridge_points: List[dict]
+    bridge_points: List[Dict[str, Any]]
 
 
 class RouteResponse(BaseModel):
@@ -181,20 +175,68 @@ def build_google_maps_url(
     return "https://www.google.com/maps/dir/?" + urlencode(params, safe="|,")
 
 
+def coerce_delivery_list(raw: Any) -> List[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [str(x).strip() for x in raw if str(x).strip()]
+    # e.g. "LS1 1AA\nLS2 2BB"
+    if isinstance(raw, str):
+        return [s.strip() for s in raw.splitlines() if s.strip()]
+    return []
+
+
 # ---------------------------------------------------------------------------
-# API route
+# API route – manual input parsing, very forgiving
 # ---------------------------------------------------------------------------
 
 
 @app.post("/api/route", response_model=RouteResponse)
-def generate_route(request: RouteRequest):
-    if not request.delivery_postcodes:
+def generate_route(payload: Dict[str, Any] = Body(...)):
+    """
+    Accepts a very flexible JSON body – works with both old and new frontends.
+
+    Expected keys (any of these variations are accepted):
+      - vehicleHeight OR vehicle_height_m
+      - depotPostcode OR originPostcode OR startPostcode
+      - deliveryPostcodes OR postcodes
+    """
+    # Vehicle height
+    vh = (
+        payload.get("vehicleHeight")
+        or payload.get("vehicle_height_m")
+        or payload.get("vehicleHeightM")
+    )
+    if vh is None:
+        raise HTTPException(status_code=400, detail="vehicle height is required")
+    try:
+        vehicle_height = float(vh)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="vehicle height must be a number")
+
+    # Depot / origin postcode
+    depot = (
+        payload.get("depotPostcode")
+        or payload.get("originPostcode")
+        or payload.get("startPostcode")
+    )
+    if not depot or not str(depot).strip():
+        raise HTTPException(status_code=400, detail="depot/origin postcode is required")
+    depot_postcode = str(depot).strip()
+
+    # Delivery postcodes list
+    raw_deliveries = (
+        payload.get("deliveryPostcodes")
+        or payload.get("postcodes")
+        or payload.get("stops")
+    )
+    delivery_postcodes = coerce_delivery_list(raw_deliveries)
+    if not delivery_postcodes:
         raise HTTPException(
             status_code=400, detail="At least one delivery postcode is required"
         )
 
-    # 🔴 Use depot_postcode as the first stop – matches the existing frontend concept
-    stops = [request.depot_postcode] + request.delivery_postcodes
+    stops = [depot_postcode] + delivery_postcodes
     legs: List[RouteLeg] = []
 
     for i in range(len(stops) - 1):
@@ -213,7 +255,7 @@ def generate_route(request: RouteRequest):
             start_lon=start_lon,
             end_lat=end_lat,
             end_lon=end_lon,
-            vehicle_height_m=request.vehicle_height_m,
+            vehicle_height_m=vehicle_height,
         )
 
         bridge_list = (
@@ -232,7 +274,7 @@ def generate_route(request: RouteRequest):
             end_postcode=end_pc,
             distance_km=round(distance_km, 1),
             duration_min=round(duration_min, 1),
-            vehicle_height_m=request.vehicle_height_m,
+            vehicle_height_m=vehicle_height,
             has_conflict=check.has_conflict,
             near_height_limit=check.near_height_limit,
             bridge_message=build_bridge_message(check),
@@ -249,10 +291,9 @@ def generate_route(request: RouteRequest):
 
 
 # ---------------------------------------------------------------------------
-# Static frontend mount
+# Static frontend mount: serve /web at "/"
 # ---------------------------------------------------------------------------
 
-# Serve everything in /web from "/"
 app.mount(
     "/",
     StaticFiles(directory=str(WEB_DIR), html=True),
