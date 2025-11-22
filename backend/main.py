@@ -1,6 +1,20 @@
 # ===========================
-# RouteSafe-AI Backend (FULL, v1.1 with CORS)
+# RouteSafe-AI Backend (FULL)
 # ===========================
+#
+# FastAPI service that:
+#  - Normalises UK postcodes (LS270BN -> "LS27 0BN")
+#  - Geocodes start/end via OpenRouteService
+#  - Requests an HGV route from ORS
+#  - Returns the raw ORS route payload + the cleaned postcodes
+#
+# Endpoint used by the front-end:
+#   POST /api/route
+#
+# Root health check:
+#   GET  /
+
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -8,57 +22,89 @@ import requests
 import os
 import re
 
-# ORS API key
+
+# ===========================
+# CONFIG
+# ===========================
+# ORS API key from environment (Render → Environment)
 ORS_API_KEY = os.getenv("ORS_API_KEY")
 
+if not ORS_API_KEY:
+    # Fail fast if key is missing – helps debugging on Render
+    raise RuntimeError("ORS_API_KEY environment variable is not set")
+
+
+# ===========================
+# FASTAPI APP
+# ===========================
 app = FastAPI(
     title="RouteSafe-AI",
-    version="1.1",
+    version="1.0",
     description="HGV low-bridge routing engine – avoid low bridges",
 )
 
-# ------------------------------------------------------------
-# CORS – allow the Navigator frontend to call this API
-# ------------------------------------------------------------
-# You can tighten this list if you want, but this will
-# definitely allow both your Render frontend + any dev hosts.
-ALLOWED_ORIGINS = [
-    "https://routesafe-navigator.onrender.com",
-    "https://routesafe-navigator.onrender.com/",
-    "https://chrisburley01.github.io",
-    "https://chrisburley01.github.io/",
-    "http://localhost",
-    "http://localhost:5173",
-    "http://localhost:8000",
-]
-
+# CORS so the Navigator frontend (different domain) can call this API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=["*"],  # you can restrict to "https://routesafe-navigator.onrender.com"
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ------------------------------------------------------------
-# UK POSTCODE NORMALISER (fix for LS270BN, M314QN, HD50RJ etc.)
-# ------------------------------------------------------------
+
+# ===========================
+# HELPERS
+# ===========================
 def normalise_uk_postcode(value: str) -> str:
+    """
+    Normalise UK postcodes like:
+      "ls270bn"  -> "LS27 0BN"
+      "M314qn"   -> "M31 4QN"
+      "HD50RJ"   -> "HD5 0RJ"
+    Only applies if the cleaned string length looks like a UK postcode (5–7 chars).
+    """
     if not value:
         return value
 
+    # Remove spaces and non-alphanumerics, force upper case
     raw = re.sub(r"[^A-Za-z0-9]", "", value).upper()
 
-    # Only normalise values that look like UK postcodes
-    if 5 <= len(raw) <= 7:
-        return f"{raw[:-3]} {raw[-3:]}"
-    # Fallback: just trimmed original string
-    return value.strip()
+    # If it doesn't look like a UK postcode length, just return trimmed original
+    if not (5 <= len(raw) <= 7):
+        return value.strip()
+
+    # Insert a space before the last 3 characters
+    return f"{raw[:-3]} {raw[-3:]}"
 
 
-# ------------------------------------------------------------
-# Request model
-# ------------------------------------------------------------
+def geocode_address(query: str):
+    """
+    Use OpenRouteService geocoding to turn a string into lon/lat.
+    """
+    url = "https://api.openrouteservice.org/geocode/search"
+    params = {"api_key": ORS_API_KEY, "text": query}
+
+    r = requests.get(url, params=params, timeout=15)
+    if r.status_code != 200:
+        raise HTTPException(
+            status_code=400,
+            detail=f"ORS geocode failed for '{query}': HTTP {r.status_code}",
+        )
+
+    data = r.json()
+    features = data.get("features") or []
+    if not features:
+        raise HTTPException(status_code=400, detail=f"Unable to geocode: {query}")
+
+    coords = features[0]["geometry"]["coordinates"]
+    # ORS returns [lon, lat]
+    return coords[0], coords[1]
+
+
+# ===========================
+# REQUEST MODEL
+# ===========================
 class RouteRequest(BaseModel):
     start: str
     end: str
@@ -66,74 +112,63 @@ class RouteRequest(BaseModel):
     avoid_low_bridges: bool = True
 
 
-# ------------------------------------------------------------
-# Geocoding using ORS
-# ------------------------------------------------------------
-def geocode_address(query: str):
-    if not ORS_API_KEY:
-        raise HTTPException(
-            status_code=500,
-            detail="ORS_API_KEY is not configured on the server.",
-        )
-
-    url = "https://api.openrouteservice.org/geocode/search"
-    params = {"api_key": ORS_API_KEY, "text": query}
-
-    r = requests.get(url, params=params)
-    if r.status_code != 200:
-        raise HTTPException(status_code=400, detail=f"ORS geocode failed: {query}")
-
-    data = r.json()
-    if not data.get("features"):
-        raise HTTPException(status_code=400, detail=f"Unable to geocode: {query}")
-
-    coords = data["features"][0]["geometry"]["coordinates"]
-    return coords[0], coords[1]  # lon, lat
-
-
-# ------------------------------------------------------------
-# Route engine (ORS directions + your bridge engine later)
-# ------------------------------------------------------------
+# ===========================
+# ROUTE ENDPOINT
+# ===========================
 @app.post("/api/route")
 def create_route(req: RouteRequest):
-    # 1) CLEAN THE POSTCODES FIRST
+    """
+    Main HGV routing endpoint.
+    Called by RouteSafe Navigator front-end.
+    """
+
+    # 1) Normalise postcodes/addresses
     start_query = normalise_uk_postcode(req.start)
     end_query = normalise_uk_postcode(req.end)
 
-    # 2) GEOCODE
+    # 2) Geocode both points
     start_lon, start_lat = geocode_address(start_query)
     end_lon, end_lat = geocode_address(end_query)
 
-    # 3) ORS routing (HGV profile)
-    url = "https://api.openrouteservice.org/v2/directions/driving-hgv"
+    # 3) Request an HGV route from ORS
+    directions_url = "https://api.openrouteservice.org/v2/directions/driving-hgv"
     body = {
         "coordinates": [
             [start_lon, start_lat],
             [end_lon, end_lat],
         ]
+        # later we can add 'extra_info', 'vehicle_type', etc.
     }
-    headers = {"Authorization": ORS_API_KEY, "Content-Type": "application/json"}
+    headers = {
+        "Authorization": ORS_API_KEY,
+        "Content-Type": "application/json",
+    }
 
-    r = requests.post(url, json=body, headers=headers)
+    r = requests.post(directions_url, json=body, headers=headers, timeout=30)
 
     if r.status_code != 200:
-        raise HTTPException(status_code=400, detail=f"ORS routing failed: {r.text}")
+        # Bubble the ORS error text for easier debugging
+        raise HTTPException(
+            status_code=400,
+            detail=f"ORS routing failed: HTTP {r.status_code} – {r.text}",
+        )
 
-    route = r.json()
+    route_data = r.json()
 
-    # Bridge-engine hook will go here later
+    # TODO: Plug in bridge_engine here to analyse each leg vs UK bridge dataset
 
     return {
         "ok": True,
         "start_used": start_query,
         "end_used": end_query,
-        "route": route,
+        "route": route_data,
+        # "bridge_risk": ... (future)
     }
 
 
-# ------------------------------------------------------------
-# Base endpoint
-# ------------------------------------------------------------
+# ===========================
+# ROOT HEALTH CHECK
+# ===========================
 @app.get("/")
 def root():
     return {
