@@ -1,7 +1,7 @@
 # bridge_engine.py
 #
-# Uses cleaned Network Rail bridge data (lat, lon, height_m)
-# to check a straight-line leg for low-bridge risks.
+# Uses cleaned UK low-bridge data (lat, lon, height_m)
+# to check a straight-line leg (start → end) for low-bridge risks.
 
 from dataclasses import dataclass
 from typing import Optional, List, Tuple
@@ -22,10 +22,12 @@ class Bridge:
 
 @dataclass
 class BridgeCheckResult:
-    has_conflict: bool
-    near_height_limit: bool
+    has_conflict: bool                    # at least one bridge too low
+    near_height_limit: bool               # bridges close to the height
     nearest_bridge: Optional[Bridge]
     nearest_distance_m: Optional[float]
+    conflict_bridges: List[Bridge]        # all bridges that are too low
+    near_bridges: List[Bridge]            # all bridges close to the limit
 
 
 class BridgeEngine:
@@ -45,86 +47,89 @@ class BridgeEngine:
         near_clearance_m: float = 0.25,
     ):
         """
-        :param csv_path: path to cleaned bridge CSV (lat, lon, height_m)
-        :param search_radius_m: only consider bridges within this distance of leg
-        :param conflict_clearance_m: if vehicle_height_m + this > bridge.height_m => hard conflict
-        :param near_clearance_m: if vehicle_height_m + this > bridge.height_m => near-height warning
+        :param csv_path: Path to cleaned CSV of bridges
+        :param search_radius_m: How far from the leg line to look (in metres)
+        :param conflict_clearance_m: Clearance below vehicle height that counts as conflict
+        :param near_clearance_m: Clearance band where we flag "near" bridges
         """
         self.csv_path = csv_path
-        self.search_radius_m = float(search_radius_m)
-        self.conflict_clearance_m = float(conflict_clearance_m)
-        self.near_clearance_m = float(near_clearance_m)
+        self.search_radius_m = search_radius_m
+        self.conflict_clearance_m = conflict_clearance_m
+        self.near_clearance_m = near_clearance_m
 
-        df = pd.read_csv(self.csv_path)
-
-        required_cols = {"lat", "lon", "height_m"}
-        missing = required_cols - set(df.columns)
-        if missing:
-            raise ValueError(f"Bridge CSV is missing required columns: {missing}")
-
-        # Clean and keep only rows with valid values
-        df["lat"] = pd.to_numeric(df["lat"], errors="coerce")
-        df["lon"] = pd.to_numeric(df["lon"], errors="coerce")
-        df["height_m"] = pd.to_numeric(df["height_m"], errors="coerce")
-
-        df = df.dropna(subset=["lat", "lon", "height_m"])
+        df = pd.read_csv(csv_path)
+        # Ensure the expected columns exist
+        for col in ["lat", "lon", "height_m"]:
+            if col not in df.columns:
+                raise ValueError(f"CSV is missing required column '{col}'")
 
         self.bridges: List[Bridge] = [
-            Bridge(lat=float(r["lat"]), lon=float(r["lon"]), height_m=float(r["height_m"]))
-            for _, r in df.iterrows()
+            Bridge(float(row["lat"]), float(row["lon"]), float(row["height_m"]))
+            for _, row in df.iterrows()
         ]
 
-        print(f"[BridgeEngine] Loaded {len(self.bridges)} bridges from {self.csv_path}.")
-
-    # ---------------- geometry helpers ---------------- #
+    # --- Geometry helpers -------------------------------------------------
 
     @staticmethod
-    def _deg_to_rad(deg: float) -> float:
-        return deg * math.pi / 180.0
-
-    @staticmethod
-    def _latlon_to_xy_m(lat: float, lon: float, ref_lat: float) -> Tuple[float, float]:
-        """
-        Convert lat/lon to local x,y in metres using a simple equirectangular approximation.
-        This is good enough for short legs (tens of km).
-        """
-        lat_r = BridgeEngine._deg_to_rad(lat)
-        lon_r = BridgeEngine._deg_to_rad(lon)
-        ref_lat_r = BridgeEngine._deg_to_rad(ref_lat)
-
-        x = EARTH_RADIUS_M * lon_r * math.cos(ref_lat_r)
-        y = EARTH_RADIUS_M * lat_r
-        return x, y
-
-    @staticmethod
-    def _point_to_segment_distance_m(
-        px: float,
-        py: float,
-        x1: float,
-        y1: float,
-        x2: float,
-        y2: float,
+    def _haversine_distance(
+        lat1: float, lon1: float, lat2: float, lon2: float
     ) -> float:
         """
-        Euclidean distance from point P(px,py) to segment A(x1,y1) – B(x2,y2)
-        in metres (in local x,y coordinates).
+        Great-circle distance between two points in metres.
         """
-        dx = x2 - x1
-        dy = y2 - y1
+        phi1 = math.radians(lat1)
+        phi2 = math.radians(lat2)
+        dphi = math.radians(lat2 - lat1)
+        dlambda = math.radians(lon2 - lon1)
 
-        if dx == 0 and dy == 0:
-            # A and B are the same point
-            return math.hypot(px - x1, py - y1)
+        a = math.sin(dphi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(
+            dlambda / 2.0
+        ) ** 2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        return EARTH_RADIUS_M * c
 
-        t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)
-        t = max(0.0, min(1.0, t))
+    @classmethod
+    def _point_to_segment_distance(
+        cls,
+        lat_p: float,
+        lon_p: float,
+        lat_a: float,
+        lon_a: float,
+        lat_b: float,
+        lon_b: float,
+    ) -> float:
+        """
+        Approximate distance (in metres) from point P to segment AB
+        using a local flat projection.
+        """
+        # Convert to metres using a local projection around A
+        # (good enough for the small distances we’re dealing with)
+        def to_xy(lat_ref: float, lon_ref: float, lat: float, lon: float) -> Tuple[float, float]:
+            x = math.radians(lon - lon_ref) * EARTH_RADIUS_M * math.cos(math.radians(lat_ref))
+            y = math.radians(lat - lat_ref) * EARTH_RADIUS_M
+            return x, y
 
-        proj_x = x1 + t * dx
-        proj_y = y1 + t * dy
+        ax, ay = to_xy(lat_a, lon_a, lat_a, lon_a)
+        bx, by = to_xy(lat_a, lon_a, lat_b, lon_b)
+        px, py = to_xy(lat_a, lon_a, lat_p, lon_p)
 
-        return math.hypot(px - proj_x, py - proj_y)
+        abx = bx - ax
+        aby = by - ay
+        apx = px - ax
+        apy = py - ay
 
-    # ---------------- public API ---------------- #
+        ab_len_sq = abx * abx + aby * aby
+        if ab_len_sq == 0:
+            # Degenerate segment
+            return math.hypot(apx, apy)
+
+        t = max(0.0, min(1.0, (apx * abx + apy * aby) / ab_len_sq))
+        closest_x = ax + t * abx
+        closest_y = ay + t * aby
+
+        return math.hypot(px - closest_x, py - closest_y)
+
+    # --- Public API --------------------------------------------------------
 
     def check_leg(
         self,
@@ -135,62 +140,49 @@ class BridgeEngine:
         vehicle_height_m: float,
     ) -> BridgeCheckResult:
         """
-        Check a leg for low-bridge issues.
-
-        We approximate the driven path as a straight line between start and end
-        and look for bridges within search_radius_m of that line.
-
-        :param start_lat: start point latitude
-        :param start_lon: start point longitude
-        :param end_lat: end point latitude
-        :param end_lon: end point longitude
-        :param vehicle_height_m: running height of the vehicle in metres
-
-        :returns: BridgeCheckResult
+        Check a single leg (start -> end) for low bridges near the straight line.
         """
-        if not self.bridges:
-            return BridgeCheckResult(
-                has_conflict=False,
-                near_height_limit=False,
-                nearest_bridge=None,
-                nearest_distance_m=None,
-            )
 
-        vehicle_height_m = float(vehicle_height_m)
-        ref_lat = (start_lat + end_lat) / 2.0
-
-        # Convert endpoints to local x,y in metres
-        x1, y1 = self._latlon_to_xy_m(start_lat, start_lon, ref_lat)
-        x2, y2 = self._latlon_to_xy_m(end_lat, end_lon, ref_lat)
-
-        has_conflict = False
-        near_height_limit = False
         nearest_bridge: Optional[Bridge] = None
         nearest_distance_m: Optional[float] = None
+        conflict_bridges: List[Bridge] = []
+        near_bridges: List[Bridge] = []
 
-        for b in self.bridges:
-            bx, by = self._latlon_to_xy_m(b.lat, b.lon, ref_lat)
-            dist_m = self._point_to_segment_distance_m(bx, by, x1, y1, x2, y2)
+        for bridge in self.bridges:
+            d = self._point_to_segment_distance(
+                bridge.lat,
+                bridge.lon,
+                start_lat,
+                start_lon,
+                end_lat,
+                end_lon,
+            )
 
-            # Too far from the leg
-            if dist_m > self.search_radius_m:
+            if d > self.search_radius_m:
                 continue
 
+            # Track nearest bridge for info
+            if nearest_distance_m is None or d < nearest_distance_m:
+                nearest_bridge = bridge
+                nearest_distance_m = d
+
             # Height logic
-            if b.height_m < vehicle_height_m + self.conflict_clearance_m:
-                has_conflict = True
+            height_diff = vehicle_height_m - bridge.height_m
 
-            if b.height_m < vehicle_height_m + self.near_clearance_m:
-                near_height_limit = True
+            if height_diff > self.conflict_clearance_m:
+                conflict_bridges.append(bridge)
+            elif height_diff > -self.near_clearance_m:
+                # Within near band (slightly above or even marginally below)
+                near_bridges.append(bridge)
 
-            # Track nearest relevant bridge
-            if nearest_distance_m is None or dist_m < nearest_distance_m:
-                nearest_distance_m = dist_m
-                nearest_bridge = b
+        has_conflict = len(conflict_bridges) > 0
+        near_height_limit = not has_conflict and len(near_bridges) > 0
 
         return BridgeCheckResult(
             has_conflict=has_conflict,
             near_height_limit=near_height_limit,
             nearest_bridge=nearest_bridge,
             nearest_distance_m=nearest_distance_m,
+            conflict_bridges=conflict_bridges,
+            near_bridges=near_bridges,
         )
