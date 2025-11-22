@@ -74,11 +74,29 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       const data = await res.json();
-      renderLegs(data.legs || []);
+      console.log("API response", data);
+
+      // NEW: if backend sends an error, show it and stop.
+      if (data && data.error) {
+        if (statusEl) {
+          statusEl.textContent = "Backend error: " + data.error;
+          statusEl.style.color = "#c0392b";
+        }
+        renderLegs([]); // clear any legs
+        return;
+      }
+
+      const legs = data.legs || [];
+      renderLegs(legs);
 
       if (statusEl) {
-        statusEl.textContent = "Route generated successfully.";
-        statusEl.style.color = "#1c7c3c";
+        if (legs.length > 0) {
+          statusEl.textContent = "Route generated successfully.";
+          statusEl.style.color = "#1c7c3c";
+        } else {
+          statusEl.textContent = "No legs returned from backend.";
+          statusEl.style.color = "#c0392b";
+        }
       }
     } catch (err) {
       console.error(err);
@@ -116,11 +134,13 @@ document.addEventListener("DOMContentLoaded", () => {
       badge.className = "route-leg-badge";
 
       // Use backend safety_label so we NEVER show HGV SAFE if there's a low bridge
-      const label = leg.safety_label || (leg.has_conflict
-        ? "LOW BRIDGE RISK"
-        : leg.near_height_limit
-        ? "CHECK HEIGHT"
-        : "HGV SAFE");
+      const label =
+        leg.safety_label ||
+        (leg.has_conflict
+          ? "LOW BRIDGE RISK"
+          : leg.near_height_limit
+          ? "CHECK HEIGHT"
+          : "HGV SAFE");
       badge.textContent = label;
 
       if (leg.has_conflict) {
