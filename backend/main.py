@@ -1,28 +1,38 @@
 # ===========================
 # RouteSafe-AI Backend v5.0R
-# (no polyline, robust errors, pydantic-safe types)
+# (no polyline, robust errors, serves UI)
 # ===========================
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import os
 import re
 import requests
-from typing import Optional, Dict, Any
 
 from bridge_engine import BridgeEngine  # uses bridge_heights_clean.csv
 
 # ORS API key from Render env
 ORS_API_KEY = os.getenv("ORS_API_KEY")
 if not ORS_API_KEY:
-    # Fail early with a clear message in the root endpoint
     ORS_API_KEY = None
+
+# --- paths for the frontend files (../web) ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+WEB_DIR = os.path.join(BASE_DIR, "..", "web")
+INDEX_FILE = os.path.join(WEB_DIR, "index.html")
 
 app = FastAPI(
     title="RouteSafe-AI",
     version="5.0R-no-polyline",
     description="HGV low-bridge routing engine – avoid low bridges",
 )
+
+# Serve static frontend assets (styles.css, app.js) under /static
+if os.path.isdir(WEB_DIR):
+    app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+
 
 # ------------------------------------------------------------
 # Create a single BridgeEngine instance at startup
@@ -35,7 +45,7 @@ try:
         near_clearance_m=0.25,
     )
     BRIDGE_ENGINE_OK = True
-    BRIDGE_ENGINE_ERROR: Optional[str] = None
+    BRIDGE_ENGINE_ERROR = None
 except Exception as e:
     bridge_engine = None
     BRIDGE_ENGINE_OK = False
@@ -152,9 +162,9 @@ class RouteRequest(BaseModel):
 class BridgeRiskSummary(BaseModel):
     has_conflict: bool
     near_height_limit: bool
-    nearest_bridge_height_m: Optional[float] = None
-    nearest_bridge_distance_m: Optional[float] = None
-    note: Optional[str] = None
+    nearest_bridge_height_m: float | None
+    nearest_bridge_distance_m: float | None
+    note: str | None = None
 
 
 class RouteResponse(BaseModel):
@@ -164,7 +174,7 @@ class RouteResponse(BaseModel):
     distance_m: float
     duration_s: float
     bridge_risk: BridgeRiskSummary
-    raw_route: Dict[str, Any]
+    raw_route: dict
 
 
 # ------------------------------------------------------------
@@ -212,11 +222,10 @@ def create_route(req: RouteRequest):
                 vehicle_height_m=req.vehicle_height_m,
             )
 
-            nearest_h: Optional[float] = (
-                result.nearest_bridge.height_m
-                if result.nearest_bridge is not None
-                else None
-            )
+            if result.nearest_bridge is not None:
+                nearest_h = result.nearest_bridge.height_m
+            else:
+                nearest_h = None
 
             bridge_risk = BridgeRiskSummary(
                 has_conflict=result.has_conflict,
@@ -246,11 +255,32 @@ def create_route(req: RouteRequest):
 
 
 # ------------------------------------------------------------
-# Base endpoint
+# UI + health endpoints
 # ------------------------------------------------------------
 
-@app.get("/")
-def root():
+@app.get("/", include_in_schema=False)
+def serve_index():
+    """
+    Serve the nice frontend UI at the root.
+    """
+    if os.path.exists(INDEX_FILE):
+        return FileResponse(INDEX_FILE)
+    # Fallback if the file isn't there for some reason
+    return {
+        "service": "RouteSafe-AI",
+        "version": "5.0R-no-polyline",
+        "status": "ok",
+        "bridge_engine_ok": BRIDGE_ENGINE_OK,
+        "bridge_engine_error": BRIDGE_ENGINE_ERROR,
+        "message": "Frontend index.html not found; API is running. Use POST /api/route.",
+    }
+
+
+@app.get("/health")
+def health():
+    """
+    JSON health endpoint (what you currently see at /).
+    """
     return {
         "service": "RouteSafe-AI",
         "version": "5.0R-no-polyline",
