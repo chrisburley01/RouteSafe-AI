@@ -4,9 +4,11 @@
 # - Serves the SPA frontend from the /web folder
 # - Exposes /api/route for low-bridge-checked HGV route legs
 # - Accepts a flexible JSON body from the frontend without strict validation.
+# - If a leg has a low-bridge conflict, it *tries* an alternative route that
+#   avoids a small polygon around the nearest low bridge.
 
-import os
 import math
+import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from urllib.parse import urlencode, quote_plus
@@ -103,34 +105,26 @@ def geocode_postcode(postcode: str) -> (float, float):
     return lat, lon
 
 
-def build_avoidance_polygon(bridge: Bridge, radius_m: float = 150.0) -> Dict[str, Any]:
+def build_avoid_polygon(lat: float, lon: float, radius_km: float = 0.3) -> Dict[str, Any]:
     """
-    Build a small polygon around the low bridge so ORS can avoid it.
-
-    It's an approximate circle (actually an octagon) centred on the bridge.
+    Build a small square polygon (in degrees) around a low bridge which ORS
+    will avoid when routing. This is a pragmatic approximation – good enough
+    for a prototype.
     """
-    lat = bridge.lat
-    lon = bridge.lon
+    # 1 degree latitude ~= 111 km
+    d_lat = radius_km / 111.0
+    # longitude shrink factor with latitude
+    d_lon = radius_km / (111.0 * math.cos(math.radians(lat)))
 
-    # Rough metres -> degrees conversion
-    lat_deg = radius_m / 111_320.0
-    # Avoid division by zero at poles
-    lon_deg = radius_m / (111_320.0 * max(math.cos(math.radians(lat)), 1e-6))
+    coords = [
+        [lon - d_lon, lat - d_lat],
+        [lon - d_lon, lat + d_lat],
+        [lon + d_lon, lat + d_lat],
+        [lon + d_lon, lat - d_lat],
+        [lon - d_lon, lat - d_lat],
+    ]
 
-    coords: List[List[float]] = []
-    for angle in range(0, 360, 45):  # 8 points (0,45,...,315)
-        rad = math.radians(angle)
-        dlat = lat_deg * math.sin(rad)
-        dlon = lon_deg * math.cos(rad)
-        coords.append([lon + dlon, lat + dlat])
-
-    # Close polygon
-    coords.append(coords[0])
-
-    return {
-        "type": "Polygon",
-        "coordinates": [coords],
-    }
+    return {"type": "Polygon", "coordinates": [coords]}
 
 
 def fetch_leg_summary(
@@ -138,24 +132,19 @@ def fetch_leg_summary(
     start_lon: float,
     end_lat: float,
     end_lon: float,
-    avoid_bridge: Optional[Bridge] = None,
+    avoid_polygon: Optional[Dict[str, Any]] = None,
 ) -> (float, float):
     """
-    Call ORS directions for a single leg.
-
-    If avoid_bridge is provided, we add an avoid_polygons option
-    so ORS finds an alternative route that doesn't pass through
-    a small area around that bridge.
+    Call ORS HGV directions. If avoid_polygon is provided, we pass it as
+    options.avoid_polygons to steer the route around the low bridge area.
     """
     headers = {"Authorization": ORS_API_KEY, "Content-Type": "application/json"}
     payload: Dict[str, Any] = {
         "coordinates": [[start_lon, start_lat], [end_lon, end_lat]]
     }
 
-    if avoid_bridge is not None:
-        payload["options"] = {
-            "avoid_polygons": build_avoidance_polygon(avoid_bridge)
-        }
+    if avoid_polygon is not None:
+        payload["options"] = {"avoid_polygons": avoid_polygon}
 
     r = requests.post(ORS_DIRECTIONS_URL, json=payload, headers=headers, timeout=15)
     if r.status_code != 200:
@@ -197,25 +186,28 @@ def build_google_maps_url(
     bridge: Optional[Bridge],
 ) -> str:
     """
-    Build a Google Maps directions URL.
-
-    - If bridge is provided, we add it as a waypoint so the red pin appears
-      on the direct (unsafe) route.
-    - If bridge is None, it's just origin -> destination.
+    Direct route with an optional pin on the bridge (for unsafe/direct leg).
     """
     origin = quote_plus(start_postcode)
     destination = quote_plus(end_postcode)
 
-    params: Dict[str, str] = {
-        "api": "1",
-        "origin": origin,
-        "destination": destination,
-    }
+    params: Dict[str, Any] = {"api": "1", "origin": origin, "destination": destination}
 
     if bridge is not None:
         waypoints = f"{bridge.lat},{bridge.lon}"
         params["waypoints"] = waypoints
 
+    return "https://www.google.com/maps/dir/?" + urlencode(params, safe="|,")
+
+
+def build_safe_google_maps_url(start_postcode: str, end_postcode: str) -> str:
+    """
+    For the alternative/safe leg we *don't* pin the bridge – we just give
+    origin/destination and let the driver choose the safe route in Maps.
+    """
+    origin = quote_plus(start_postcode)
+    destination = quote_plus(end_postcode)
+    params = {"api": "1", "origin": origin, "destination": destination}
     return "https://www.google.com/maps/dir/?" + urlencode(params, safe="|,")
 
 
@@ -232,10 +224,6 @@ async def generate_route(body: Dict[str, Any]):
     - vehicleHeight OR vehicle_height_m OR height
     - originPostcode OR origin_postcode OR depotPostcode OR startPostcode
     - deliveryPostcodes OR delivery_postcodes OR postcodes OR drops
-
-    For each leg we now also attempt an *alternative* HGV route that
-    avoids any conflicting low bridge, returning both the direct and
-    alternative metrics/links.
     """
     data = body or {}
 
@@ -301,7 +289,7 @@ async def generate_route(body: Dict[str, Any]):
             )
             continue
 
-        # ORS routing – direct route
+        # ORS routing – direct leg
         try:
             distance_km, duration_min = fetch_leg_summary(
                 start_lat, start_lon, end_lat, end_lon
@@ -328,37 +316,33 @@ async def generate_route(body: Dict[str, Any]):
 
         nearest = check.nearest_bridge
 
-        # -------------------------------------------------------------------
-        # Alternative route (avoid low bridge) – only if we have a conflict
-        # and a specific nearest bridge.
-        # -------------------------------------------------------------------
+        # Defaults for alternative route
         has_alternative = False
         alt_distance_km: Optional[float] = None
         alt_duration_min: Optional[float] = None
         safe_google_maps_url: Optional[str] = None
 
+        # If the leg is unsafe and we know the nearest bridge, try alt route
         if check.has_conflict and nearest is not None:
             try:
+                avoid_poly = build_avoid_polygon(nearest.lat, nearest.lon, radius_km=0.3)
                 alt_distance_km, alt_duration_min = fetch_leg_summary(
-                    start_lat, start_lon, end_lat, end_lon, avoid_bridge=nearest
+                    start_lat,
+                    start_lon,
+                    end_lat,
+                    end_lon,
+                    avoid_polygon=avoid_poly,
                 )
                 has_alternative = True
-                # For the "Alternative route" card we give a clean origin->dest link.
-                # Google can't natively take the ORS avoid polygon, but drivers can
-                # choose the alternative option in Google while knowing this leg
-                # has a low-bridge-free option.
-                safe_google_maps_url = build_google_maps_url(
-                    start_pc, end_pc, bridge=None
-                )
+                safe_google_maps_url = build_safe_google_maps_url(start_pc, end_pc)
             except HTTPException as e:
-                # Log but don't kill the whole response
-                print("DEBUG alternative route failed:", e.detail)
+                # If alt routing fails we still return the unsafe leg
+                print("Alternative routing failed:", e.detail)
 
-        leg = {
+        leg: Dict[str, Any] = {
             "index": i + 1,
             "start_postcode": start_pc,
             "end_postcode": end_pc,
-            # direct route metrics
             "distance_km": round(distance_km, 1),
             "duration_min": round(duration_min, 1),
             "vehicle_height_m": vehicle_height,
@@ -366,18 +350,11 @@ async def generate_route(body: Dict[str, Any]):
             "near_height_limit": check.near_height_limit,
             "bridge_message": build_bridge_message(check),
             "safety_label": build_safety_label(check),
-            # Direct route with red bridge pin (for UNSAFE card / reference)
             "google_maps_url": build_google_maps_url(start_pc, end_pc, nearest),
-            # Alternative route info (for SAFE card)
             "has_alternative": has_alternative,
-            "alt_distance_km": round(alt_distance_km, 1)
-            if alt_distance_km is not None
-            else None,
-            "alt_duration_min": round(alt_duration_min, 1)
-            if alt_duration_min is not None
-            else None,
+            "alt_distance_km": round(alt_distance_km, 1) if alt_distance_km else None,
+            "alt_duration_min": round(alt_duration_min, 1) if alt_duration_min else None,
             "safe_google_maps_url": safe_google_maps_url,
-            # Bridge points for pinning / debugging
             "bridge_points": []
             if nearest is None
             else [
