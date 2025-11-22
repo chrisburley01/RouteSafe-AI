@@ -1,20 +1,32 @@
 # backend/main.py
 #
-# FastAPI backend for RouteSafe – generates HGV legs, checks low bridges
-# using our CSV, and returns a Google Maps URL with bridge pins per leg.
+# RouteSafe backend:
+# - Serves the SPA frontend from ../web (index.html, app.js, styles.css)
+# - Exposes /api/route for low-bridge-checked HGV route legs
 
 import os
+from pathlib import Path
 from typing import List
 from urllib.parse import urlencode, quote_plus
 
 import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from bridge_engine import BridgeEngine, BridgeCheckResult, Bridge
 
-# --- Config -----------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+
+BASE_DIR = Path(__file__).resolve().parent          # .../backend
+WEB_DIR = BASE_DIR.parent / "web"                   # .../web
+
+# ---------------------------------------------------------------------------
+# External services config
+# ---------------------------------------------------------------------------
 
 ORS_API_KEY = os.getenv("ORS_API_KEY")
 if not ORS_API_KEY:
@@ -23,11 +35,12 @@ if not ORS_API_KEY:
 ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-hgv"
 ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
 
-# --- Models -----------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Pydantic models
+# ---------------------------------------------------------------------------
 
 
 class RouteRequest(BaseModel):
-    # keys as they appear in JSON body from frontend
     vehicle_height_m: float = Field(..., alias="vehicleHeight")
     origin_postcode: str = Field(..., alias="originPostcode")
     delivery_postcodes: List[str] = Field(..., alias="deliveryPostcodes")
@@ -52,14 +65,16 @@ class RouteResponse(BaseModel):
     legs: List[RouteLeg]
 
 
-# --- App setup --------------------------------------------------------------
-
+# ---------------------------------------------------------------------------
+# FastAPI app
+# ---------------------------------------------------------------------------
 
 app = FastAPI(title="RouteSafe HGV Low-Bridge Checker")
 
+# Frontend lives on the same origin, but we’ll leave CORS open for now
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # frontend is separate (web/), so allow all
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -67,14 +82,9 @@ app.add_middleware(
 
 bridge_engine = BridgeEngine()
 
-
-@app.get("/")
-def root():
-    """Simple root so hitting the backend URL doesn't show a 404."""
-    return {"detail": "RouteSafe API is running. POST to /api/route."}
-
-
-# --- Helpers ----------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
 
 
 def geocode_postcode(postcode: str) -> (float, float):
@@ -150,7 +160,7 @@ def build_google_maps_url(
 ) -> str:
     """
     Build a Google Maps directions URL with bridge pins as waypoints.
-    Pins come straight from our CSV via BridgeEngine.
+    Pins are taken directly from our CSV via BridgeEngine.
     """
     origin = quote_plus(start_postcode)
     destination = quote_plus(end_postcode)
@@ -159,12 +169,14 @@ def build_google_maps_url(
 
     if bridges:
         waypoints = "|".join(f"{b.lat},{b.lon}" for b in bridges)
-        params["waypoints"] = waypoints  # standard pins
+        params["waypoints"] = waypoints
 
     return "https://www.google.com/maps/dir/?" + urlencode(params, safe="|,")
 
 
-# --- API route --------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# API route
+# ---------------------------------------------------------------------------
 
 
 @app.post("/api/route", response_model=RouteResponse)
@@ -228,3 +240,18 @@ def generate_route(request: RouteRequest):
         legs.append(leg)
 
     return RouteResponse(legs=legs)
+
+
+# ---------------------------------------------------------------------------
+# Static frontend mount (served from /web at the repo root)
+# ---------------------------------------------------------------------------
+
+# This will:
+#   - serve index.html at "/"
+#   - serve app.js and styles.css at "/app.js" and "/styles.css"
+#   - leave anything under "/api/..." to the API routes above
+app.mount(
+    "/",
+    StaticFiles(directory=str(WEB_DIR), html=True),
+    name="web",
+)
