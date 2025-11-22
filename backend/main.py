@@ -1,5 +1,5 @@
 # ===============================
-# RouteSafe-AI backend  (v5.0R)
+# RouteSafe-AI backend  (v5.0R-no-polyline)
 # HGV low-bridge routing engine
 # ===============================
 
@@ -9,7 +9,6 @@ from typing import List, Optional, Tuple
 import os
 import re
 import requests
-import polyline
 
 from bridge_engine import BridgeEngine, BridgeCheckResult
 
@@ -24,7 +23,7 @@ if not ORS_API_KEY:
 
 app = FastAPI(
     title="RouteSafe-AI",
-    version="5.0",
+    version="5.0R",
     description="HGV low-bridge routing engine – ORS + UK bridge data",
 )
 
@@ -78,6 +77,58 @@ def geocode_address(query: str) -> Tuple[float, float]:
     return coords[0], coords[1]
 
 
+def decode_ors_polyline(encoded: str, precision: int = 5) -> List[Tuple[float, float]]:
+    """
+    Decode an encoded polyline (Google polyline algorithm) into
+    a list of (lat, lon) pairs. ORS uses this format by default.
+    """
+    if not encoded:
+        return []
+
+    coordinates: List[Tuple[float, float]] = []
+    index = 0
+    lat = 0
+    lng = 0
+    factor = 10 ** precision
+
+    length = len(encoded)
+
+    while index < length:
+        # Decode latitude
+        result = 0
+        shift = 0
+        while True:
+            if index >= length:
+                break
+            b = ord(encoded[index]) - 63
+            index += 1
+            result |= (b & 0x1F) << shift
+            shift += 5
+            if b < 0x20:
+                break
+        dlat = ~(result >> 1) if (result & 1) else (result >> 1)
+        lat += dlat
+
+        # Decode longitude
+        result = 0
+        shift = 0
+        while True:
+            if index >= length:
+                break
+            b = ord(encoded[index]) - 63
+            index += 1
+            result |= (b & 0x1F) << shift
+            shift += 5
+            if b < 0x20:
+                break
+        dlng = ~(result >> 1) if (result & 1) else (result >> 1)
+        lng += dlng
+
+        coordinates.append((lat / factor, lng / factor))
+
+    return coordinates
+
+
 # ------------------------------------------------------------------
 # Pydantic models
 # ------------------------------------------------------------------
@@ -116,9 +167,8 @@ def create_route(req: RouteRequest):
         "coordinates": [
             [start_lon, start_lat],
             [end_lon, end_lat],
-        ],
+        ]
         # Keep payload simple & compatible with current ORS
-        # (no geometry_format / no extra options that might 400)
     }
     headers = {
         "Authorization": ORS_API_KEY,
@@ -154,7 +204,7 @@ def create_route(req: RouteRequest):
         )
 
     # Decode to [(lat, lon), ...]
-    coords_latlon: List[Tuple[float, float]] = polyline.decode(encoded_geom)
+    coords_latlon: List[Tuple[float, float]] = decode_ors_polyline(encoded_geom)
 
     # For bridge engine we want [lon, lat]
     coords_lonlat: List[Tuple[float, float]] = [
@@ -222,7 +272,7 @@ def create_route(req: RouteRequest):
 def root():
     return {
         "service": "RouteSafe-AI",
-        "version": "5.0R",
+        "version": "5.0R-no-polyline",
         "status": "ok",
         "message": "HGV low-bridge routing engine – use POST /api/route",
     }
