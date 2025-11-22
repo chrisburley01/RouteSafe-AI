@@ -122,3 +122,151 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function renderLegs(legs) {
+    if (!legsContainer) return;
+    legsContainer.innerHTML = "";
+
+    if (!legs || legs.length === 0) {
+      legsContainer.innerHTML = "<p>No legs generated yet.</p>";
+      return;
+    }
+
+    legs.forEach((leg) => {
+      // For non-conflict legs: single green/amber card, as before
+      if (!leg.has_conflict) {
+        const card = document.createElement("div");
+        card.className = "route-leg-card";
+
+        const headerRow = document.createElement("div");
+        headerRow.className = "route-leg-header-row";
+
+        const title = document.createElement("h3");
+        title.className = "route-leg-title";
+        title.textContent = `Leg ${leg.index}: ${leg.start_postcode} → ${leg.end_postcode}`;
+
+        const badge = document.createElement("span");
+        badge.className = "route-leg-badge";
+
+        const label =
+          leg.safety_label ||
+          (leg.near_height_limit ? "CHECK HEIGHT" : "HGV SAFE");
+        badge.textContent = label;
+
+        if (leg.near_height_limit) {
+          badge.classList.add("badge-warning");
+        } else {
+          badge.classList.add("badge-safe");
+        }
+
+        headerRow.appendChild(title);
+        headerRow.appendChild(badge);
+
+        card.appendChild(headerRow);
+        card.appendChild(createLegMetaBlock(leg));
+
+        const bridgeMsg = document.createElement("p");
+        bridgeMsg.className = "route-leg-bridge-msg";
+        bridgeMsg.textContent = leg.bridge_message;
+        card.appendChild(bridgeMsg);
+
+        const mapsBtn = document.createElement("button");
+        mapsBtn.className = "primary-btn maps-btn";
+        mapsBtn.type = "button";
+        mapsBtn.textContent = leg.near_height_limit
+          ? "Open in Google Maps (double-check clearance)"
+          : "Open in Google Maps (with bridge pins)";
+        mapsBtn.addEventListener("click", () => {
+          if (leg.google_maps_url) {
+            window.open(leg.google_maps_url, "_blank");
+          }
+        });
+
+        card.appendChild(mapsBtn);
+        legsContainer.appendChild(card);
+        return;
+      }
+
+      // If has_conflict === true:
+      // 🔴 Card 1 – direct route, unsafe, NO Maps button
+      const unsafeCard = document.createElement("div");
+      unsafeCard.className = "route-leg-card route-leg-card-unsafe";
+
+      const unsafeHeaderRow = document.createElement("div");
+      unsafeHeaderRow.className = "route-leg-header-row";
+
+      const unsafeTitle = document.createElement("h3");
+      unsafeTitle.className = "route-leg-title";
+      unsafeTitle.textContent = `Leg ${leg.index}: ${leg.start_postcode} → ${leg.end_postcode}`;
+
+      const unsafeBadge = document.createElement("span");
+      unsafeBadge.className = "route-leg-badge badge-danger";
+      unsafeBadge.textContent = "LOW BRIDGE RISK – DIRECT ROUTE";
+
+      unsafeHeaderRow.appendChild(unsafeTitle);
+      unsafeHeaderRow.appendChild(unsafeBadge);
+
+      unsafeCard.appendChild(unsafeHeaderRow);
+      unsafeCard.appendChild(createLegMetaBlock(leg));
+
+      const unsafeMsg = document.createElement("p");
+      unsafeMsg.className = "route-leg-bridge-msg";
+      unsafeMsg.textContent =
+        "⚠️ Low bridge on this direct route. Do NOT follow this route at the current vehicle height.";
+      unsafeCard.appendChild(unsafeMsg);
+
+      const unsafeHint = document.createElement("p");
+      unsafeHint.className = "route-leg-meta";
+      unsafeHint.textContent =
+        "Use the green HGV-safe route card below instead.";
+      unsafeCard.appendChild(unsafeHint);
+
+      legsContainer.appendChild(unsafeCard);
+
+      // 🟢 Card 2 – suggested alternative with Maps button
+      const safeCard = document.createElement("div");
+      safeCard.className = "route-leg-card route-leg-card-safe-alt";
+
+      const safeHeaderRow = document.createElement("div");
+      safeHeaderRow.className = "route-leg-header-row";
+
+      const safeTitle = document.createElement("h3");
+      safeTitle.className = "route-leg-title";
+      safeTitle.textContent = `Leg ${leg.index}: Suggested HGV-safe route`;
+
+      const safeBadge = document.createElement("span");
+      safeBadge.className = "route-leg-badge badge-safe";
+      safeBadge.textContent = "HGV-SAFE ROUTE";
+
+      safeHeaderRow.appendChild(safeTitle);
+      safeHeaderRow.appendChild(safeBadge);
+
+      safeCard.appendChild(safeHeaderRow);
+      safeCard.appendChild(createLegMetaBlock(leg));
+
+      const safeMsg = document.createElement("p");
+      safeMsg.className = "route-leg-bridge-msg";
+      safeMsg.textContent =
+        "Open in Google Maps and choose an alternative route that does not pass the red bridge pin. This is your HGV-safe route for this leg.";
+      safeCard.appendChild(safeMsg);
+
+      const mapsBtnAlt = document.createElement("button");
+      mapsBtnAlt.className = "primary-btn maps-btn";
+      mapsBtnAlt.type = "button";
+      mapsBtnAlt.textContent = "Open in Google Maps for HGV-safe route";
+      mapsBtnAlt.addEventListener("click", () => {
+        if (leg.google_maps_url) {
+          window.open(leg.google_maps_url, "_blank");
+        }
+      });
+
+      safeCard.appendChild(mapsBtnAlt);
+      legsContainer.appendChild(safeCard);
+    });
+  }
+
+  if (generateBtn) {
+    generateBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      generateRoute();
+    });
+  }
+});
