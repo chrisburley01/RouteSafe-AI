@@ -1,137 +1,67 @@
-# ===============================
-# RouteSafe-AI backend  (v5.0R-no-polyline)
-# HGV low-bridge routing engine
-# ===============================
-
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional, Tuple
+from typing import Optional, List, Tuple
 import os
 import re
 import requests
 
 from bridge_engine import BridgeEngine, BridgeCheckResult
 
-# ------------------------------------------------------------------
+# ------------------------------------------------------------
 # Config
-# ------------------------------------------------------------------
+# ------------------------------------------------------------
 ORS_API_KEY = os.getenv("ORS_API_KEY")
-
-if not ORS_API_KEY:
-    # Fail fast if key not set – easier to debug on Render
-    raise RuntimeError("ORS_API_KEY environment variable is not set")
 
 app = FastAPI(
     title="RouteSafe-AI",
-    version="5.0R",
+    version="5.1-restore",
     description="HGV low-bridge routing engine – ORS + UK bridge data",
 )
 
-# Single bridge engine instance (loads CSV once at startup)
+# Single BridgeEngine instance (loads CSV once on startup)
 bridge_engine = BridgeEngine(csv_path="bridge_heights_clean.csv")
 
 
-# ------------------------------------------------------------------
+# ------------------------------------------------------------
 # Helpers
-# ------------------------------------------------------------------
+# ------------------------------------------------------------
 def normalise_uk_postcode(value: str) -> str:
     """
-    Normalise UK postcodes:
-    LS270BN -> LS27 0BN
-    m314qn  -> M31 4QN
+    Normalise things like 'LS270BN' or 'ls27 0bn' -> 'LS27 0BN'.
+    If it doesn't look like a UK postcode, just trim whitespace.
     """
     if not value:
         return value
 
     raw = re.sub(r"[^A-Za-z0-9]", "", value).upper()
-
-    # Only normalise values that *look* like postcodes
     if not (5 <= len(raw) <= 7):
         return value.strip()
-
     return f"{raw[:-3]} {raw[-3:]}"
 
 
-def geocode_address(query: str) -> Tuple[float, float]:
-    """
-    Geocode with ORS. Returns (lon, lat).
-    """
-    url = "https://api.openrouteservice.org/geocode/search"
-    params = {"api_key": ORS_API_KEY, "text": query}
-
-    r = requests.get(url, params=params, timeout=20)
-    if r.status_code != 200:
-        raise HTTPException(
-            status_code=400,
-            detail=f"ORS geocode failed for '{query}': {r.text}",
-        )
-
-    data = r.json()
-    features = data.get("features") or []
-    if not features:
-        raise HTTPException(
-            status_code=400, detail=f"Unable to geocode: {query}"
-        )
-
-    coords = features[0]["geometry"]["coordinates"]  # [lon, lat]
-    return coords[0], coords[1]
+def format_distance(meters: Optional[float]) -> str:
+    if meters is None:
+        return "-"
+    if meters < 1000:
+        return f"{meters:.0f} m"
+    km = meters / 1000.0
+    return f"{km:.1f} km"
 
 
-def decode_ors_polyline(encoded: str, precision: int = 5) -> List[Tuple[float, float]]:
-    """
-    Decode an encoded polyline (Google polyline algorithm) into
-    a list of (lat, lon) pairs. ORS uses this format by default.
-    """
-    if not encoded:
-        return []
-
-    coordinates: List[Tuple[float, float]] = []
-    index = 0
-    lat = 0
-    lng = 0
-    factor = 10 ** precision
-
-    length = len(encoded)
-
-    while index < length:
-        # Decode latitude
-        result = 0
-        shift = 0
-        while True:
-            if index >= length:
-                break
-            b = ord(encoded[index]) - 63
-            index += 1
-            result |= (b & 0x1F) << shift
-            shift += 5
-            if b < 0x20:
-                break
-        dlat = ~(result >> 1) if (result & 1) else (result >> 1)
-        lat += dlat
-
-        # Decode longitude
-        result = 0
-        shift = 0
-        while True:
-            if index >= length:
-                break
-            b = ord(encoded[index]) - 63
-            index += 1
-            result |= (b & 0x1F) << shift
-            shift += 5
-            if b < 0x20:
-                break
-        dlng = ~(result >> 1) if (result & 1) else (result >> 1)
-        lng += dlng
-
-        coordinates.append((lat / factor, lng / factor))
-
-    return coordinates
+def format_duration(seconds: Optional[float]) -> str:
+    if seconds is None:
+        return "-"
+    seconds = int(seconds)
+    hours, rem = divmod(seconds, 3600)
+    mins, _ = divmod(rem, 60)
+    if hours:
+        return f"{hours}h {mins}m"
+    return f"{mins} min"
 
 
-# ------------------------------------------------------------------
-# Pydantic models
-# ------------------------------------------------------------------
+# ------------------------------------------------------------
+# Request model
+# ------------------------------------------------------------
 class RouteRequest(BaseModel):
     start: str
     end: str
@@ -139,140 +69,221 @@ class RouteRequest(BaseModel):
     avoid_low_bridges: bool = True
 
 
-# ------------------------------------------------------------------
-# API endpoints
-# ------------------------------------------------------------------
-@app.post("/api/route")
-def create_route(req: RouteRequest):
+# ------------------------------------------------------------
+# ORS helpers
+# ------------------------------------------------------------
+def geocode_address(query: str) -> Tuple[float, float]:
     """
-    Main routing endpoint used by RouteSafe Navigator.
-    1) Clean & geocode postcodes
-    2) Fetch HGV route from ORS
-    3) Decode geometry -> list of coordinates
-    4) Run low-bridge risk check across the route
-    5) Return summary + warnings + route coordinates
+    Geocode using ORS.
+    Returns (lon, lat).
     """
+    if not ORS_API_KEY:
+        raise HTTPException(status_code=500, detail="ORS_API_KEY missing on server")
 
-    # --- 1. Clean postcodes ----------------------------------------
-    start_query = normalise_uk_postcode(req.start)
-    end_query = normalise_uk_postcode(req.end)
+    url = "https://api.openrouteservice.org/geocode/search"
+    params = {"api_key": ORS_API_KEY, "text": query}
 
-    # --- 2. Geocode ------------------------------------------------
-    start_lon, start_lat = geocode_address(start_query)
-    end_lon, end_lat = geocode_address(end_query)
+    r = requests.get(url, params=params, timeout=20)
+    if r.status_code != 200:
+        raise HTTPException(status_code=400, detail=f"ORS geocode failed: {query}")
 
-    # --- 3. ORS routing (no geometry_format param – that caused 400) ----
-    url = "https://api.openrouteservice.org/v2/directions/driving-hgv"
+    data = r.json()
+    if not data.get("features"):
+        raise HTTPException(status_code=400, detail=f"Unable to geocode: {query}")
+
+    coords = data["features"][0]["geometry"]["coordinates"]
+    return coords[0], coords[1]  # lon, lat
+
+
+def fetch_route_geojson(start_lon: float, start_lat: float,
+                        end_lon: float, end_lat: float) -> dict:
+    """
+    Call ORS directions (HGV profile) and return full GeoJSON feature collection.
+
+    IMPORTANT: uses the /geojson endpoint.
+    No `geometry_format`, no `polyline` library – ORS gives us raw coordinates.
+    """
+    if not ORS_API_KEY:
+        raise HTTPException(status_code=500, detail="ORS_API_KEY missing on server")
+
+    url = "https://api.openrouteservice.org/v2/directions/driving-hgv/geojson"
     body = {
         "coordinates": [
             [start_lon, start_lat],
             [end_lon, end_lat],
         ]
-        # Keep payload simple & compatible with current ORS
     }
-    headers = {
-        "Authorization": ORS_API_KEY,
-        "Content-Type": "application/json",
-    }
+    params = {"api_key": ORS_API_KEY}
 
-    r = requests.post(url, json=body, headers=headers, timeout=40)
+    r = requests.post(url, json=body, params=params, timeout=40)
     if r.status_code != 200:
-        raise HTTPException(
-            status_code=400,
-            detail=f"ORS routing failed (400): {r.text}",
+        raise HTTPException(status_code=400, detail=f"ORS routing failed: {r.text}")
+
+    return r.json()
+
+
+# ------------------------------------------------------------
+# Bridge analysis over the route coordinates
+# ------------------------------------------------------------
+def analyse_bridges_along_route(
+    coords: List[List[float]], vehicle_height_m: float
+) -> dict:
+    """
+    Run the BridgeEngine over each leg of the route.
+    coords: list of [lon, lat]
+    """
+    has_conflict = False
+    near_height = False
+    nearest_bridge = None
+    nearest_distance_m = None
+    warnings: List[str] = []
+
+    for i in range(len(coords) - 1):
+        lon1, lat1 = coords[i]
+        lon2, lat2 = coords[i + 1]
+
+        # BridgeEngine takes (lat, lon)
+        result: BridgeCheckResult = bridge_engine.check_leg(
+            (lat1, lon1),
+            (lat2, lon2),
+            vehicle_height_m=vehicle_height_m,
         )
 
-    data = r.json()
-    routes = data.get("routes") or []
-    if not routes:
-        raise HTTPException(
-            status_code=400,
-            detail="No route returned from ORS.",
-        )
+        if result.nearest_bridge:
+            d = result.nearest_distance_m or 0.0
+            if nearest_distance_m is None or d < nearest_distance_m:
+                nearest_distance_m = d
+                nearest_bridge = result.nearest_bridge
 
-    route0 = routes[0]
-    summary = route0.get("summary", {})
-    distance_m = float(summary.get("distance", 0.0))
-    duration_s = float(summary.get("duration", 0.0))
+        if result.has_conflict:
+            has_conflict = True
+            if result.nearest_bridge and result.nearest_distance_m is not None:
+                warnings.append(
+                    f"Low bridge conflict near "
+                    f"({result.nearest_bridge.lat:.5f}, {result.nearest_bridge.lon:.5f}) "
+                    f"height {result.nearest_bridge.height_m:.2f} m "
+                    f"within {result.nearest_distance_m:.0f} m of route."
+                )
+        elif result.near_height_limit:
+            near_height = True
+            if result.nearest_bridge and result.nearest_distance_m is not None:
+                warnings.append(
+                    f"Bridge near height limit "
+                    f"({result.nearest_bridge.height_m:.2f} m) "
+                    f"within {result.nearest_distance_m:.0f} m of route at "
+                    f"({result.nearest_bridge.lat:.5f}, {result.nearest_bridge.lon:.5f})."
+                )
 
-    # ORS default is encoded polyline string
-    encoded_geom = route0.get("geometry")
-    if not encoded_geom:
-        raise HTTPException(
-            status_code=400,
-            detail="ORS response missing geometry.",
-        )
-
-    # Decode to [(lat, lon), ...]
-    coords_latlon: List[Tuple[float, float]] = decode_ors_polyline(encoded_geom)
-
-    # For bridge engine we want [lon, lat]
-    coords_lonlat: List[Tuple[float, float]] = [
-        (lon, lat) for (lat, lon) in coords_latlon
-    ]
-
-    # --- 4. Bridge risk analysis -----------------------------------
-    bridge_result: BridgeCheckResult = bridge_engine.check_route(
-        coords_lonlat, req.vehicle_height_m
-    )
-
-    # Risk label for UI
-    if bridge_result.has_conflict:
-        risk_label = "high"
-    elif bridge_result.near_height_limit:
-        risk_label = "medium"
+    if has_conflict:
+        risk_level = "high"
+        risk_badge = "High risk"
+        risk_text = "Low-bridge conflicts detected on this route."
+    elif near_height:
+        risk_level = "medium"
+        risk_badge = "Medium risk"
+        risk_text = "Route passes close to bridges near your vehicle height."
     else:
-        risk_label = "low"
+        risk_level = "low"
+        risk_badge = "Low risk"
+        risk_text = "No low-bridge conflicts detected based on current data."
 
-    nearest_height = (
-        bridge_result.nearest_bridge.height_m
-        if bridge_result.nearest_bridge
-        else None
-    )
-    nearest_distance = bridge_result.nearest_distance_m
-
-    # Build warnings list for UI
-    warnings_payload = []
-    for w in bridge_result.warnings:
-        warnings_payload.append(
-            {
-                "lat": w.bridge.lat,
-                "lon": w.bridge.lon,
-                "bridge_height_m": w.bridge.height_m,
-                "distance_m": w.distance_m,
-                "severity": w.severity,
-                "message": w.message,
-            }
+    if nearest_bridge and nearest_distance_m is not None:
+        nearest_bridge_text = (
+            f"{nearest_bridge.height_m:.2f} m bridge approx "
+            f"{nearest_distance_m:.0f} m from route."
         )
+    else:
+        nearest_bridge_text = "None on route"
 
-    # --- 5. Response payload (v5-style) -----------------------------
+    return {
+        "risk_level": risk_level,
+        "risk_badge": risk_badge,
+        "risk_text": risk_text,
+        "nearest_bridge_text": nearest_bridge_text,
+        "warnings": warnings,
+    }
+
+
+# ------------------------------------------------------------
+# API route
+# ------------------------------------------------------------
+@app.post("/api/route")
+def create_route(req: RouteRequest):
+    # 1) Clean / normalise postcodes
+    start_query = normalise_uk_postcode(req.start)
+    end_query = normalise_uk_postcode(req.end)
+
+    # 2) Geocode both ends
+    start_lon, start_lat = geocode_address(start_query)
+    end_lon, end_lat = geocode_address(end_query)
+
+    # 3) Get ORS route as GeoJSON
+    route_geojson = fetch_route_geojson(start_lon, start_lat, end_lon, end_lat)
+
+    features = route_geojson.get("features") or []
+    if not features:
+        raise HTTPException(status_code=400, detail="No route returned from ORS.")
+
+    feature0 = features[0]
+    geometry = feature0.get("geometry") or {}
+    coords = geometry.get("coordinates") or []
+    if not coords:
+        raise HTTPException(status_code=400, detail="Route geometry missing from ORS.")
+
+    props = feature0.get("properties") or {}
+    summary = props.get("summary") or {}
+    distance_m = summary.get("distance")
+    duration_s = summary.get("duration")
+
+    # 4) Bridge risk analysis (if enabled)
+    if req.avoid_low_bridges:
+        bridge_info = analyse_bridges_along_route(coords, req.vehicle_height_m)
+    else:
+        bridge_info = {
+            "risk_level": "unknown",
+            "risk_badge": "Not checked",
+            "risk_text": "Low-bridge analysis disabled for this request.",
+            "nearest_bridge_text": "Not checked",
+            "warnings": [],
+        }
+
+    # 5) Simple per-step summary for front end (optional)
+    steps_out: List[dict] = []
+    segments = props.get("segments") or []
+    if segments:
+        seg0 = segments[0]
+        for step in seg0.get("steps", []):
+            steps_out.append(
+                {
+                    "instruction": step.get("instruction", ""),
+                    "distance_text": format_distance(step.get("distance")),
+                }
+            )
+
     return {
         "ok": True,
-        "engine": "RouteSafe-AI v5.0R",
         "start_used": start_query,
         "end_used": end_query,
-        "summary": {
-            "distance_km": round(distance_m / 1000.0, 2),
-            "duration_minutes": int(round(duration_s / 60.0)),
-            "bridge_risk": risk_label,
-            "nearest_bridge_height_m": nearest_height,
-            "nearest_bridge_distance_m": (
-                round(nearest_distance, 1) if nearest_distance else None
-            ),
-        },
-        "route": {
-            # For Leaflet: [lat, lon] pairs
-            "coordinates": [[lat, lon] for (lat, lon) in coords_latlon],
-        },
-        "warnings": warnings_payload,
+        "distance_text": format_distance(distance_m),
+        "duration_text": format_duration(duration_s),
+        "risk_level": bridge_info["risk_level"],
+        "risk_badge": bridge_info["risk_badge"],
+        "risk_text": bridge_info["risk_text"],
+        "nearest_bridge_text": bridge_info["nearest_bridge_text"],
+        "warnings": bridge_info["warnings"],
+        "steps": steps_out,
+        "route_geojson": route_geojson,
     }
 
 
+# ------------------------------------------------------------
+# Health check
+# ------------------------------------------------------------
 @app.get("/")
 def root():
     return {
         "service": "RouteSafe-AI",
-        "version": "5.0R-no-polyline",
         "status": "ok",
         "message": "HGV low-bridge routing engine – use POST /api/route",
+        "version": "5.1-restore",
     }
