@@ -1,6 +1,6 @@
 # ===========================
 # RouteSafe-AI Backend v5.0R
-# (no polyline, robust errors)
+# (no polyline, robust errors, pydantic-safe types)
 # ===========================
 
 from fastapi import FastAPI, HTTPException
@@ -8,12 +8,12 @@ from pydantic import BaseModel
 import os
 import re
 import requests
+from typing import Optional, Dict, Any
 
 from bridge_engine import BridgeEngine  # uses bridge_heights_clean.csv
 
 # ORS API key from Render env
 ORS_API_KEY = os.getenv("ORS_API_KEY")
-
 if not ORS_API_KEY:
     # Fail early with a clear message in the root endpoint
     ORS_API_KEY = None
@@ -21,7 +21,7 @@ if not ORS_API_KEY:
 app = FastAPI(
     title="RouteSafe-AI",
     version="5.0R-no-polyline",
-    description="HGV low-bridge routing engine – avoid low bridges"
+    description="HGV low-bridge routing engine – avoid low bridges",
 )
 
 # ------------------------------------------------------------
@@ -35,7 +35,7 @@ try:
         near_clearance_m=0.25,
     )
     BRIDGE_ENGINE_OK = True
-    BRIDGE_ENGINE_ERROR = None
+    BRIDGE_ENGINE_ERROR: Optional[str] = None
 except Exception as e:
     bridge_engine = None
     BRIDGE_ENGINE_OK = False
@@ -152,9 +152,9 @@ class RouteRequest(BaseModel):
 class BridgeRiskSummary(BaseModel):
     has_conflict: bool
     near_height_limit: bool
-    nearest_bridge_height_m: float | None
-    nearest_bridge_distance_m: float | None
-    note: str | None = None
+    nearest_bridge_height_m: Optional[float] = None
+    nearest_bridge_distance_m: Optional[float] = None
+    note: Optional[str] = None
 
 
 class RouteResponse(BaseModel):
@@ -164,7 +164,7 @@ class RouteResponse(BaseModel):
     distance_m: float
     duration_s: float
     bridge_risk: BridgeRiskSummary
-    raw_route: dict
+    raw_route: Dict[str, Any]
 
 
 # ------------------------------------------------------------
@@ -188,10 +188,7 @@ def create_route(req: RouteRequest):
     duration_s = float(summary.get("duration", 0.0))
 
     # 4) Bridge risk assessment (straight-line leg for now)
-    bridge_note = None
-
     if not BRIDGE_ENGINE_OK or bridge_engine is None:
-        # Bridge engine didn't load – don't crash, just explain
         bridge_risk = BridgeRiskSummary(
             has_conflict=False,
             near_height_limit=False,
@@ -215,10 +212,11 @@ def create_route(req: RouteRequest):
                 vehicle_height_m=req.vehicle_height_m,
             )
 
-            if result.nearest_bridge is not None:
-                nearest_h = result.nearest_bridge.height_m
-            else:
-                nearest_h = None
+            nearest_h: Optional[float] = (
+                result.nearest_bridge.height_m
+                if result.nearest_bridge is not None
+                else None
+            )
 
             bridge_risk = BridgeRiskSummary(
                 has_conflict=result.has_conflict,
