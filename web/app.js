@@ -1,6 +1,6 @@
 // web/app.js
 // RouteSafe AI frontend
-// Version: 0.5.0  (single route + guided alternative via Google Maps)
+// Version: 0.6.0  (dual cards on LOW BRIDGE: red direct, green alternative)
 
 document.addEventListener("DOMContentLoaded", () => {
   // Backend base URL (Render backend)
@@ -104,106 +104,21 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function createLegMetaBlock(leg) {
+    const fragment = document.createDocumentFragment();
+
+    const meta = document.createElement("p");
+    meta.className = "route-leg-meta";
+    meta.textContent = `Distance: ${leg.distance_km} km · Time: ${leg.duration_min} min`;
+
+    const height = document.createElement("p");
+    height.className = "route-leg-meta";
+    height.textContent = `Vehicle height: ${leg.vehicle_height_m} m`;
+
+    fragment.appendChild(meta);
+    fragment.appendChild(height);
+
+    return fragment;
+  }
+
   function renderLegs(legs) {
-    if (!legsContainer) return;
-    legsContainer.innerHTML = "";
-
-    if (!legs || legs.length === 0) {
-      legsContainer.innerHTML = "<p>No legs generated yet.</p>";
-      return;
-    }
-
-    legs.forEach((leg) => {
-      const card = document.createElement("div");
-      card.className = "route-leg-card";
-
-      const headerRow = document.createElement("div");
-      headerRow.className = "route-leg-header-row";
-
-      const title = document.createElement("h3");
-      title.className = "route-leg-title";
-      title.textContent = `Leg ${leg.index}: ${leg.start_postcode} → ${leg.end_postcode}`;
-
-      const badge = document.createElement("span");
-      badge.className = "route-leg-badge";
-
-      // Use backend safety_label so we NEVER show HGV SAFE if there's a low bridge
-      const label =
-        leg.safety_label ||
-        (leg.has_conflict
-          ? "LOW BRIDGE RISK"
-          : leg.near_height_limit
-          ? "CHECK HEIGHT"
-          : "HGV SAFE");
-
-      badge.textContent = label;
-
-      if (leg.has_conflict) {
-        badge.classList.add("badge-danger");
-      } else if (leg.near_height_limit) {
-        badge.classList.add("badge-warning");
-      } else {
-        badge.classList.add("badge-safe");
-      }
-
-      headerRow.appendChild(title);
-      headerRow.appendChild(badge);
-
-      const meta = document.createElement("p");
-      meta.className = "route-leg-meta";
-      meta.textContent = `Distance: ${leg.distance_km} km · Time: ${leg.duration_min} min`;
-
-      const height = document.createElement("p");
-      height.className = "route-leg-meta";
-      height.textContent = `Vehicle height: ${leg.vehicle_height_m} m`;
-
-      const bridgeMsg = document.createElement("p");
-      bridgeMsg.className = "route-leg-bridge-msg";
-      bridgeMsg.textContent = leg.bridge_message;
-
-      card.appendChild(headerRow);
-      card.appendChild(meta);
-      card.appendChild(height);
-      card.appendChild(bridgeMsg);
-
-      // Extra guidance when there's a low bridge risk:
-      if (leg.has_conflict) {
-        const hint = document.createElement("p");
-        hint.className = "route-leg-meta";
-        hint.textContent =
-          "Suggested: open in Google Maps and choose an alternative route that does not pass the red bridge pin.";
-        card.appendChild(hint);
-      }
-
-      const mapsBtn = document.createElement("button");
-      mapsBtn.className = "primary-btn maps-btn";
-      mapsBtn.type = "button";
-
-      if (leg.has_conflict) {
-        mapsBtn.textContent = "Open in Google Maps for alternative route";
-      } else if (leg.near_height_limit) {
-        mapsBtn.textContent =
-          "Open in Google Maps (double-check clearance & routes)";
-      } else {
-        mapsBtn.textContent = "Open in Google Maps (with bridge pins)";
-      }
-
-      mapsBtn.addEventListener("click", () => {
-        if (leg.google_maps_url) {
-          window.open(leg.google_maps_url, "_blank");
-        }
-      });
-
-      card.appendChild(mapsBtn);
-
-      legsContainer.appendChild(card);
-    });
-  }
-
-  if (generateBtn) {
-    generateBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      generateRoute();
-    });
-  }
-});
