@@ -1,11 +1,12 @@
 // web/app.js
-// Frontend logic for RouteSafe UI that sits in /web/index.html
+// RouteSafe AI frontend
+// Version: 0.5.0  (single route + guided alternative via Google Maps)
 
 document.addEventListener("DOMContentLoaded", () => {
-  // Backend base URL (your Render backend)
+  // Backend base URL (Render backend)
   const API_BASE = "https://routesafe-ai.onrender.com";
 
-  // Default origin (your depot).
+  // Default origin (depot)
   const DEFAULT_ORIGIN = "LS270BN";
 
   const vehicleHeightInput =
@@ -71,30 +72,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (!res.ok) {
         const txt = await res.text();
+        console.error("Backend error response:", txt);
         throw new Error("Server error " + res.status + ": " + txt);
       }
 
       const data = await res.json();
       console.log("API response", data);
+      renderLegs(data.legs || []);
 
-      if (data && data.error) {
-        if (statusEl) {
-          statusEl.textContent = "Backend error: " + data.error;
-          statusEl.style.color = "#c0392b";
-        }
-        renderLegs([]);
-        return;
-      }
-
-      const legs = data.legs || [];
-      renderLegs(legs);
+      const anyLegs = data.legs && data.legs.length > 0;
 
       if (statusEl) {
-        if (legs.length > 0) {
+        if (anyLegs) {
           statusEl.textContent = "Route generated successfully.";
           statusEl.style.color = "#1c7c3c";
         } else {
-          statusEl.textContent = "No legs returned from backend.";
+          statusEl.textContent =
+            "No legs returned – please check your inputs and try again.";
           statusEl.style.color = "#c0392b";
         }
       }
@@ -115,7 +109,7 @@ document.addEventListener("DOMContentLoaded", () => {
     legsContainer.innerHTML = "";
 
     if (!legs || legs.length === 0) {
-      legsContainer.innerHTML = "<p>No legs returned.</p>";
+      legsContainer.innerHTML = "<p>No legs generated yet.</p>";
       return;
     }
 
@@ -133,6 +127,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const badge = document.createElement("span");
       badge.className = "route-leg-badge";
 
+      // Use backend safety_label so we NEVER show HGV SAFE if there's a low bridge
       const label =
         leg.safety_label ||
         (leg.has_conflict
@@ -140,6 +135,7 @@ document.addEventListener("DOMContentLoaded", () => {
           : leg.near_height_limit
           ? "CHECK HEIGHT"
           : "HGV SAFE");
+
       badge.textContent = label;
 
       if (leg.has_conflict) {
@@ -155,7 +151,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const meta = document.createElement("p");
       meta.className = "route-leg-meta";
-      meta.textContent = `Distance: ${leg.distance_km} km   ·   Time: ${leg.duration_min} min`;
+      meta.textContent = `Distance: ${leg.distance_km} km · Time: ${leg.duration_min} min`;
 
       const height = document.createElement("p");
       height.className = "route-leg-meta";
@@ -165,20 +161,39 @@ document.addEventListener("DOMContentLoaded", () => {
       bridgeMsg.className = "route-leg-bridge-msg";
       bridgeMsg.textContent = leg.bridge_message;
 
+      card.appendChild(headerRow);
+      card.appendChild(meta);
+      card.appendChild(height);
+      card.appendChild(bridgeMsg);
+
+      // Extra guidance when there's a low bridge risk:
+      if (leg.has_conflict) {
+        const hint = document.createElement("p");
+        hint.className = "route-leg-meta";
+        hint.textContent =
+          "Suggested: open in Google Maps and choose an alternative route that does not pass the red bridge pin.";
+        card.appendChild(hint);
+      }
+
       const mapsBtn = document.createElement("button");
       mapsBtn.className = "primary-btn maps-btn";
       mapsBtn.type = "button";
-      mapsBtn.textContent = "Open in Google Maps (with bridge pins)";
+
+      if (leg.has_conflict) {
+        mapsBtn.textContent = "Open in Google Maps for alternative route";
+      } else if (leg.near_height_limit) {
+        mapsBtn.textContent =
+          "Open in Google Maps (double-check clearance & routes)";
+      } else {
+        mapsBtn.textContent = "Open in Google Maps (with bridge pins)";
+      }
+
       mapsBtn.addEventListener("click", () => {
         if (leg.google_maps_url) {
           window.open(leg.google_maps_url, "_blank");
         }
       });
 
-      card.appendChild(headerRow);
-      card.appendChild(meta);
-      card.appendChild(height);
-      card.appendChild(bridgeMsg);
       card.appendChild(mapsBtn);
 
       legsContainer.appendChild(card);
