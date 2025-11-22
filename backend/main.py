@@ -1,7 +1,7 @@
 # backend/main.py
 #
 # RouteSafe backend:
-# - Serves the SPA frontend from ../web (index.html, app.js, styles.css)
+# - Serves the SPA frontend from the /web folder
 # - Exposes /api/route for low-bridge-checked HGV route legs
 
 import os
@@ -18,11 +18,24 @@ from pydantic import BaseModel, Field
 from bridge_engine import BridgeEngine, BridgeCheckResult, Bridge
 
 # ---------------------------------------------------------------------------
-# Paths
+# Paths: find /web whether the service root is repo/ or repo/backend/
 # ---------------------------------------------------------------------------
 
-BASE_DIR = Path(__file__).resolve().parent          # .../backend
-WEB_DIR = BASE_DIR.parent / "web"                   # .../web
+BASE_DIR = Path(__file__).resolve().parent          # usually .../backend
+WEB_CANDIDATES = [
+    BASE_DIR / "web",          # if web is inside backend/
+    BASE_DIR.parent / "web",   # if web is a sibling: repo/web
+]
+
+WEB_DIR = None
+for c in WEB_CANDIDATES:
+    if c.is_dir():
+        WEB_DIR = c
+        break
+
+if WEB_DIR is None:
+    # Fallback to BASE_DIR just so app starts; you'll see 404s if /web is missing
+    WEB_DIR = BASE_DIR
 
 # ---------------------------------------------------------------------------
 # External services config
@@ -71,10 +84,9 @@ class RouteResponse(BaseModel):
 
 app = FastAPI(title="RouteSafe HGV Low-Bridge Checker")
 
-# Frontend lives on the same origin, but we’ll leave CORS open for now
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # safe enough for now
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -83,7 +95,7 @@ app.add_middleware(
 bridge_engine = BridgeEngine()
 
 # ---------------------------------------------------------------------------
-# Helper functions
+# Helpers
 # ---------------------------------------------------------------------------
 
 
@@ -145,7 +157,6 @@ def build_bridge_message(check: BridgeCheckResult) -> str:
 
 
 def build_safety_label(check: BridgeCheckResult) -> str:
-    # Never show HGV SAFE if there is any conflict
     if check.has_conflict:
         return "LOW BRIDGE RISK"
     if check.near_height_limit:
@@ -158,10 +169,6 @@ def build_google_maps_url(
     end_postcode: str,
     bridges: List[Bridge],
 ) -> str:
-    """
-    Build a Google Maps directions URL with bridge pins as waypoints.
-    Pins are taken directly from our CSV via BridgeEngine.
-    """
     origin = quote_plus(start_postcode)
     destination = quote_plus(end_postcode)
 
@@ -181,10 +188,6 @@ def build_google_maps_url(
 
 @app.post("/api/route", response_model=RouteResponse)
 def generate_route(request: RouteRequest):
-    """
-    Generate route legs between origin and delivery postcodes,
-    check them against low bridges and return leg summaries.
-    """
     if not request.delivery_postcodes:
         raise HTTPException(
             status_code=400, detail="At least one delivery postcode is required"
@@ -212,7 +215,9 @@ def generate_route(request: RouteRequest):
             vehicle_height_m=request.vehicle_height_m,
         )
 
-        bridge_list = check.conflict_bridges if check.conflict_bridges else check.near_bridges
+        bridge_list = (
+            check.conflict_bridges if check.conflict_bridges else check.near_bridges
+        )
 
         gm_url = build_google_maps_url(
             start_postcode=start_pc,
@@ -243,13 +248,10 @@ def generate_route(request: RouteRequest):
 
 
 # ---------------------------------------------------------------------------
-# Static frontend mount (served from /web at the repo root)
+# Static frontend mount
 # ---------------------------------------------------------------------------
 
-# This will:
-#   - serve index.html at "/"
-#   - serve app.js and styles.css at "/app.js" and "/styles.css"
-#   - leave anything under "/api/..." to the API routes above
+# Serve everything in /web (whichever candidate exists) from "/"
 app.mount(
     "/",
     StaticFiles(directory=str(WEB_DIR), html=True),
