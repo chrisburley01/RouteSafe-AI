@@ -1,283 +1,214 @@
-# backend/main.py
-#
-# RouteSafe backend:
-# - Serves the SPA frontend from the /web folder
-# - Exposes /api/route for low-bridge-checked HGV route legs
-# - NO Pydantic validation on input to avoid 422 errors.
-
 import os
-from pathlib import Path
-from typing import List, Dict, Any
-from urllib.parse import urlencode, quote_plus
-
+import math
+import pandas as pd
 import requests
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from bridge_engine import BridgeEngine
 
-from bridge_engine import BridgeEngine, BridgeCheckResult, Bridge
+app = FastAPI()
 
-# ---------------------------------------------------------------------------
-# Paths: find /web whether the service root is repo/ or repo/backend/
-# ---------------------------------------------------------------------------
-
-BASE_DIR = Path(__file__).resolve().parent          # usually .../backend
-WEB_CANDIDATES = [
-    BASE_DIR / "web",          # if web is inside backend/
-    BASE_DIR.parent / "web",   # if web is a sibling: repo/web
-]
-
-WEB_DIR = None
-for c in WEB_CANDIDATES:
-    if c.is_dir():
-        WEB_DIR = c
-        break
-
-if WEB_DIR is None:
-    WEB_DIR = BASE_DIR  # fallback – but you *do* have /web so this shouldn't happen
-
-# ---------------------------------------------------------------------------
-# External services config
-# ---------------------------------------------------------------------------
-
-ORS_API_KEY = os.getenv("ORS_API_KEY")
-if not ORS_API_KEY:
-    raise RuntimeError("Please set ORS_API_KEY in your environment.")
-
-ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-hgv"
-ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
-
-# ---------------------------------------------------------------------------
-# FastAPI app
-# ---------------------------------------------------------------------------
-
-app = FastAPI(title="RouteSafe HGV Low-Bridge Checker")
-
-# ✅ Correct pattern: pass the CLASS + kwargs, not an instance
+# Allow all origins (frontend on GitHub Pages)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-bridge_engine = BridgeEngine()
+ORS_API_KEY = os.getenv("ORS_API_KEY", "")
+bridge_engine = BridgeEngine(csv_path="bridge_heights_clean.csv")
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def geocode_postcode(postcode: str) -> (float, float):
-    params = {
-        "api_key": ORS_API_KEY,
-        "text": postcode,
-        "boundary.country": "GB",
-        "size": 1,
-    }
-    r = requests.get(ORS_GEOCODE_URL, params=params, timeout=10)
-    if r.status_code != 200:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Geocoding failed for {postcode}: {r.text}",
-        )
-
-    data = r.json()
-    features = data.get("features", [])
-    if not features:
-        raise HTTPException(
-            status_code=404, detail=f"Postcode not found: {postcode}"
-        )
-
-    coords = features[0]["geometry"]["coordinates"]
-    lon, lat = float(coords[0]), float(coords[1])
-    return lat, lon
+# -----------------------------------------------------------
+# Helper – extract first non-empty value from many variations
+# -----------------------------------------------------------
+def pick(data: dict, keys: list):
+    for k in keys:
+        if k in data and data[k] not in ("", None):
+            return data[k]
+    return None
 
 
-def fetch_leg_summary(
-    start_lat: float, start_lon: float, end_lat: float, end_lon: float
-) -> (float, float):
-    headers = {"Authorization": ORS_API_KEY, "Content-Type": "application/json"}
-    payload = {"coordinates": [[start_lon, start_lat], [end_lon, end_lat]]}
-
-    r = requests.post(ORS_DIRECTIONS_URL, json=payload, headers=headers, timeout=15)
-    if r.status_code != 200:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Routing failed: {r.text}",
-        )
-
-    data = r.json()
-    route = data["routes"][0]
-    summary = route["summary"]
-    distance_km = summary["distance"] / 1000.0
-    duration_min = summary["duration"] / 60.0
-    return distance_km, duration_min
+# -----------------------------------------------------------
+# Root check
+# -----------------------------------------------------------
+@app.get("/")
+def root():
+    return {"detail": "RouteSafe API is running. POST to /api/route."}
 
 
-def build_bridge_message(check: BridgeCheckResult) -> str:
-    if check.has_conflict:
-        return "⚠️ Low bridge on this leg. Route not HGV safe at current height."
-    if check.near_height_limit:
-        return "⚠️ Bridges close to your vehicle height – double-check before travelling."
-    if check.nearest_bridge is None:
-        return "No low bridges on this leg."
-    return "No low bridges within the risk radius for this leg."
-
-
-def build_safety_label(check: BridgeCheckResult) -> str:
-    if check.has_conflict:
-        return "LOW BRIDGE RISK"
-    if check.near_height_limit:
-        return "CHECK HEIGHT"
-    return "HGV SAFE"
-
-
-def build_google_maps_url(
-    start_postcode: str,
-    end_postcode: str,
-    bridges: List[Bridge],
-) -> str:
-    origin = quote_plus(start_postcode)
-    destination = quote_plus(end_postcode)
-
-    params = {"api": "1", "origin": origin, "destination": destination}
-
-    if bridges:
-        waypoints = "|".join(f"{b.lat},{b.lon}" for b in bridges)
-        params["waypoints"] = waypoints
-
-    return "https://www.google.com/maps/dir/?" + urlencode(params, safe="|,")
-
-
-def coerce_delivery_list(raw: Any) -> List[str]:
-    if raw is None:
-        return []
-    if isinstance(raw, list):
-        return [str(x).strip() for x in raw if str(x).strip()]
-    if isinstance(raw, str):
-        return [s.strip() for s in raw.splitlines() if s.strip()]
-    return []
-
-
-# ---------------------------------------------------------------------------
-# API route – NO Pydantic on input, so 422 can't happen
-# ---------------------------------------------------------------------------
-
-
+# -----------------------------------------------------------
+# Main route generation endpoint
+# -----------------------------------------------------------
 @app.post("/api/route")
 async def generate_route(request: Request):
-    """
-    Very forgiving endpoint – it will accept any JSON shape and try to
-    interpret it as a RouteSafe request.
 
-    Expected keys (any of these variations are accepted):
-      - vehicleHeight OR vehicle_height_m
-      - depotPostcode OR originPostcode OR startPostcode
-      - deliveryPostcodes OR postcodes OR stops
-    """
-    try:
-        payload: Dict[str, Any] = await request.json()
-    except Exception:
-        payload = {}
+    data = await request.json()
 
-    # vehicle height
-    vh = (
-        payload.get("vehicleHeight")
-        or payload.get("vehicle_height_m")
-        or payload.get("vehicleHeightM")
+    # --------
+    # INPUTS
+    # --------
+    vehicle_height = pick(
+        data,
+        [
+            "vehicleHeight",
+            "vehicle_height",
+            "vehicle_height_m",
+            "height",
+            "hgv_height",
+        ],
     )
-    if vh is None:
-        raise HTTPException(status_code=400, detail="vehicle height is required")
-    try:
-        vehicle_height = float(vh)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="vehicle height must be a number")
 
-    # depot / origin
-    depot = (
-        payload.get("depotPostcode")
-        or payload.get("originPostcode")
-        or payload.get("startPostcode")
+    origin = pick(
+        data,
+        [
+            "depotPostcode",
+            "depot_postcode",
+            "originPostcode",
+            "origin_postcode",
+            "startPostcode",
+            "start_postcode",
+        ],
     )
-    if not depot or not str(depot).strip():
-        raise HTTPException(status_code=400, detail="depot/origin postcode is required")
-    depot_postcode = str(depot).strip()
 
-    # deliveries
-    raw_deliveries = (
-        payload.get("deliveryPostcodes")
-        or payload.get("postcodes")
-        or payload.get("stops")
+    postcodes_raw = pick(
+        data,
+        [
+            "deliveryPostcodes",
+            "delivery_postcodes",
+            "postcodes",
+            "drops",
+        ],
     )
-    delivery_postcodes = coerce_delivery_list(raw_deliveries)
-    if not delivery_postcodes:
-        raise HTTPException(
-            status_code=400, detail="At least one delivery postcode is required"
-        )
 
-    stops = [depot_postcode] + delivery_postcodes
-    legs: List[Dict[str, Any]] = []
+    if not origin:
+        return {"error": "depot/origin postcode is required"}
+    if not postcodes_raw:
+        return {"error": "at least one delivery postcode is required"}
+    if not vehicle_height:
+        return {"error": "vehicle height is required"}
 
-    for i in range(len(stops) - 1):
-        start_pc = stops[i]
-        end_pc = stops[i + 1]
+    # normalise list
+    if isinstance(postcodes_raw, str):
+        delivery_list = [
+            p.strip() for p in postcodes_raw.split("\n") if p.strip()
+        ]
+    else:
+        delivery_list = postcodes_raw
 
-        start_lat, start_lon = geocode_postcode(start_pc)
-        end_lat, end_lon = geocode_postcode(end_pc)
+    # ------------------------------------------------------
+    # Build ordered route: origin → each drop in sequence
+    # ------------------------------------------------------
+    route_points = [origin] + delivery_list
 
-        distance_km, duration_min = fetch_leg_summary(
-            start_lat, start_lon, end_lat, end_lon
-        )
+    legs_output = []
 
-        check = bridge_engine.check_leg(
-            start_lat=start_lat,
-            start_lon=start_lon,
-            end_lat=end_lat,
-            end_lon=end_lon,
-            vehicle_height_m=vehicle_height,
-        )
+    for i in range(len(route_points) - 1):
+        start_pc = route_points[i]
+        end_pc = route_points[i + 1]
 
-        bridge_list = (
-            check.conflict_bridges if check.conflict_bridges else check.near_bridges
-        )
+        # 1) Geocode both ends using ORS
+        geocode_url = "https://api.openrouteservice.org/geocode/search"
 
-        gm_url = build_google_maps_url(
-            start_postcode=start_pc,
-            end_postcode=end_pc,
-            bridges=bridge_list,
-        )
+        def geocode(pc):
+            r = requests.get(
+                geocode_url,
+                params={"api_key": ORS_API_KEY, "text": pc, "boundary.country": "GB"},
+                timeout=10,
+            )
+            r.raise_for_status()
+            js = r.json()
+            coords = js["features"][0]["geometry"]["coordinates"]
+            return coords[1], coords[0]  # lat, lon
 
-        leg = {
-            "index": i + 1,
-            "start_postcode": start_pc,
-            "end_postcode": end_pc,
-            "distance_km": round(distance_km, 1),
-            "duration_min": round(duration_min, 1),
-            "vehicle_height_m": vehicle_height,
-            "has_conflict": check.has_conflict,
-            "near_height_limit": check.near_height_limit,
-            "bridge_message": build_bridge_message(check),
-            "safety_label": build_safety_label(check),
-            "google_maps_url": gm_url,
-            "bridge_points": [
-                {"lat": b.lat, "lon": b.lon, "height_m": b.height_m}
-                for b in bridge_list
-            ],
+        try:
+            start_lat, start_lon = geocode(start_pc)
+            end_lat, end_lon = geocode(end_pc)
+        except Exception as e:
+            legs_output.append(
+                {
+                    "index": i,
+                    "start_postcode": start_pc,
+                    "end_postcode": end_pc,
+                    "error": f"Failed to geocode: {str(e)}",
+                }
+            )
+            continue
+
+        # 2) ORS routing
+        route_url = "https://api.openrouteservice.org/v2/directions/driving-hgv"
+        body = {
+            "coordinates": [
+                [start_lon, start_lat],
+                [end_lon, end_lat],
+            ]
         }
-        legs.append(leg)
 
-    # Plain dict – no response validation
-    return {"legs": legs}
+        try:
+            r = requests.post(
+                route_url,
+                json=body,
+                headers={"Authorization": ORS_API_KEY},
+                timeout=15,
+            )
+            r.raise_for_status()
+            js = r.json()
+            summary = js["routes"][0]["summary"]
+            distance_km = summary["distance"] / 1000
+            duration_min = summary["duration"] / 60
+        except Exception as e:
+            legs_output.append(
+                {
+                    "index": i,
+                    "start_postcode": start_pc,
+                    "end_postcode": end_pc,
+                    "error": f"ORS routing failed: {str(e)}",
+                }
+            )
+            continue
 
+        # 3) Bridge check (straight line)
+        result = bridge_engine.check_leg(
+            (start_lat, start_lon),
+            (end_lat, end_lon),
+            float(vehicle_height),
+        )
 
-# ---------------------------------------------------------------------------
-# Static frontend mount: serve /web at "/"
-# ---------------------------------------------------------------------------
+        if result.nearest_bridge:
+            msg = (
+                f"Nearest bridge {result.nearest_bridge.height_m}m "
+                f"{result.nearest_distance_m:.0f}m from route"
+            )
+        else:
+            msg = "No bridge risk detected"
 
-app.mount(
-    "/",
-    StaticFiles(directory=str(WEB_DIR), html=True),
-    name="web",
-)
+        legs_output.append(
+            {
+                "index": i,
+                "start_postcode": start_pc,
+                "end_postcode": end_pc,
+                "distance_km": round(distance_km, 2),
+                "duration_min": round(duration_min, 1),
+                "vehicle_height_m": float(vehicle_height),
+                "has_conflict": result.has_conflict,
+                "near_height_limit": result.near_height_limit,
+                "bridge_message": msg,
+                "safety_label": (
+                    "RED – unsafe"
+                    if result.has_conflict
+                    else ("AMBER – caution" if result.near_height_limit else "GREEN – clear")
+                ),
+                "google_maps_url": f"https://www.google.com/maps/dir/{start_pc}/{end_pc}",
+                "bridge_points": []
+                if not result.nearest_bridge
+                else [
+                    {
+                        "lat": result.nearest_bridge.lat,
+                        "lon": result.nearest_bridge.lon,
+                        "height_m": result.nearest_bridge.height_m,
+                    }
+                ],
+            }
+        )
+
+    return {"legs": legs_output}
