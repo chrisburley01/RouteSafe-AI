@@ -1,98 +1,434 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RouteSafe AI – Low Bridge Checker</title>
-  <link rel="stylesheet" href="styles.css" />
-</head>
-<body>
-  <main class="page">
-    <header class="hero">
-      <div class="hero-top">
-        <!-- Replace src path if your logo file is different -->
-        <img
-          src="assets/routesafe-logo.svg"
-          alt="RouteSafe AI logo"
-          class="hero-logo"
-        />
-      </div>
+  <head>
+    <meta charset="utf-8" />
+    <title>RouteSafe AI – HGV low-bridge checker</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="RouteSafe AI checks each HGV leg for low bridges using OpenRouteService and a UK bridge dataset."
+    />
+    <link rel="icon" href="data:image/svg+xml,%F0%9F%9B%A3%EF%B8%8F" />
+    <style>
+      :root {
+        --rs-blue: #002c77;
+        --rs-blue-dark: #0f2353;
+        --rs-bg: #f3f4f6;
+        --rs-card-radius: 28px;
+        --rs-green: #16a34a;
+        --rs-green-dark: #15803d;
+        --rs-danger: #b91c1c;
+        --rs-warning: #92400e;
+      }
 
-      <h1>Keep your drop order – RouteSafe AI</h1>
-      <p class="hero-subtitle">
-        Prototype v0.5 • Checks each leg for low bridges using ORS + UK bridge dataset.
-      </p>
-    </header>
+      * {
+        box-sizing: border-box;
+      }
 
-    <section class="card">
-      <h2>Route details</h2>
-      <p class="card-subtitle">
-        Enter depot, height and postcodes in order.
-      </p>
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        background: radial-gradient(circle at top, #e5f0ff 0, #f9fafb 55%);
+        color: #111827;
+      }
 
-      <form id="routeForm">
-        <label class="field">
-          <span>Depot postcode</span>
-          <input
-            id="originPostcode"
-            type="text"
-            inputmode="text"
-            autocomplete="postal-code"
-            value="LS270BN"
-          />
-        </label>
+      .page {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 16px 16px 40px;
+      }
 
-        <label class="field">
-          <span>Vehicle / trailer height (m)</span>
-          <input
-            id="vehicleHeight"
-            type="number"
-            step="0.1"
-            min="2.0"
-            value="4.0"
-          />
-          <small>Full running height.</small>
-        </label>
+      /* Header with emoji logo */
 
-        <label class="field">
-          <span>Delivery postcodes in order</span>
-          <textarea
-            id="deliveryPostcodes"
-            rows="4"
-            placeholder="One postcode per line."
-          >HD5 0RL</textarea>
-          <small>One postcode per line.</small>
-        </label>
+      .rs-header {
+        background: var(--rs-blue);
+        color: #ffffff;
+        padding: 10px 14px;
+        border-radius: 0 0 16px 16px;
+        box-shadow: 0 12px 25px rgba(15, 35, 83, 0.4);
+        margin: -16px -16px 18px;
+      }
 
-        <button
-          id="generateRouteBtn"
-          type="submit"
-          class="primary-btn"
-        >
-          Generate safe legs
-        </button>
+      .rs-header-inner {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
 
-        <p id="routeStatus" class="status-message"></p>
-      </form>
-    </section>
+      .rs-logo-emoji {
+        font-size: 30px;
+      }
 
-    <section class="card">
-      <h2>Route legs</h2>
-      <p class="card-subtitle">Each leg checked for low bridges.</p>
+      .rs-header-title {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 700;
+      }
 
-      <div id="route-legs">
-        <p>No legs generated yet.</p>
-      </div>
-    </section>
+      .rs-header-subtitle {
+        margin: 2px 0 0;
+        font-size: 13px;
+        opacity: 0.9;
+      }
 
-    <footer class="page-footer">
-      <p>
-        Data source: OpenRouteService + internal UK low bridge dataset.
-      </p>
-    </footer>
-  </main>
+      /* Hero */
 
-  <!-- Cache-busted JS so you definitely load latest logic -->
-  <script src="app.js?v=20251122-3"></script>
-</body>
+      .hero-card {
+        border-radius: var(--rs-card-radius);
+        padding: 24px 20px 26px;
+        background: radial-gradient(circle at top left, #2563eb 0, var(--rs-blue-dark) 42%, #020617 100%);
+        color: #ffffff;
+        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.55);
+        margin-bottom: 22px;
+      }
+
+      .hero-eyebrow {
+        text-transform: uppercase;
+        font-size: 12px;
+        letter-spacing: 0.16em;
+        opacity: 0.75;
+        margin-bottom: 8px;
+      }
+
+      .hero-title {
+        margin: 0 0 8px;
+        font-size: 26px;
+        line-height: 1.25;
+        font-weight: 700;
+      }
+
+      .hero-subtitle {
+        margin: 0 0 6px;
+        font-size: 14px;
+        opacity: 0.95;
+      }
+
+      .hero-meta {
+        margin: 0;
+        font-size: 11px;
+        opacity: 0.7;
+      }
+
+      /* Cards / layout */
+
+      .card {
+        border-radius: var(--rs-card-radius);
+        background: #ffffff;
+        box-shadow: 0 14px 36px rgba(15, 23, 42, 0.18);
+        padding: 22px 20px 24px;
+        margin-bottom: 22px;
+      }
+
+      .card-header {
+        margin-bottom: 16px;
+      }
+
+      .card-title {
+        margin: 0;
+        font-size: 20px;
+        font-weight: 700;
+        color: #111827;
+      }
+
+      .card-subtitle {
+        margin: 2px 0 0;
+        font-size: 13px;
+        color: #6b7280;
+      }
+
+      label {
+        display: block;
+        font-size: 14px;
+        font-weight: 600;
+        color: #111827;
+        margin-bottom: 4px;
+      }
+
+      .field-help {
+        font-size: 12px;
+        color: #6b7280;
+        margin-top: 4px;
+      }
+
+      input[type="text"],
+      input[type="number"],
+      textarea {
+        width: 100%;
+        padding: 11px 12px;
+        border-radius: 14px;
+        border: 1px solid #d1d5db;
+        font-size: 15px;
+        outline: none;
+        background: #f9fafb;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease,
+          background 0.15s ease;
+      }
+
+      input:focus,
+      textarea:focus {
+        border-color: #2563eb;
+        box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.4);
+        background: #ffffff;
+      }
+
+      textarea {
+        min-height: 80px;
+        resize: vertical;
+      }
+
+      .form-row {
+        margin-bottom: 14px;
+      }
+
+      .primary-btn {
+        border: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 14px 22px;
+        border-radius: 999px;
+        background: linear-gradient(135deg, var(--rs-green), var(--rs-green-dark));
+        color: #ffffff;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        box-shadow: 0 18px 40px rgba(22, 163, 74, 0.55);
+        width: 100%;
+        transition: transform 0.08s ease, box-shadow 0.08s ease,
+          filter 0.1s ease;
+      }
+
+      .primary-btn:active {
+        transform: translateY(1px);
+        box-shadow: 0 10px 28px rgba(22, 163, 74, 0.5);
+        filter: brightness(0.98);
+      }
+
+      .primary-btn:disabled {
+        opacity: 0.55;
+        cursor: default;
+        box-shadow: none;
+      }
+
+      .status-text {
+        margin-top: 10px;
+        font-size: 13px;
+      }
+
+      .status-text.error {
+        color: var(--rs-danger);
+      }
+
+      .status-text.info {
+        color: #6b7280;
+      }
+
+      .status-text.success {
+        color: var(--rs-green-dark);
+      }
+
+      /* Route legs */
+
+      .route-legs-header {
+        margin-bottom: 10px;
+      }
+
+      .route-legs-header h2 {
+        margin: 0;
+        font-size: 20px;
+        font-weight: 700;
+      }
+
+      .route-legs-header p {
+        margin: 3px 0 0;
+        font-size: 13px;
+        color: #6b7280;
+      }
+
+      .route-leg-card {
+        border-radius: var(--rs-card-radius);
+        background: #ffffff;
+        box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12);
+        padding: 18px 18px 18px;
+        margin-bottom: 14px;
+      }
+
+      .route-leg-header-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 6px;
+      }
+
+      .route-leg-title {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 700;
+      }
+
+      .route-leg-badge {
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+
+      .badge-danger {
+        background: #fee2e2;
+        color: var(--rs-danger);
+      }
+
+      .badge-warning {
+        background: #fef3c7;
+        color: var(--rs-warning);
+      }
+
+      .badge-safe {
+        background: #dcfce7;
+        color: var(--rs-green-dark);
+      }
+
+      .route-leg-meta {
+        margin: 0 0 4px;
+        font-size: 13px;
+        color: #4b5563;
+      }
+
+      .route-leg-bridge-msg {
+        margin: 8px 0 12px;
+        font-size: 14px;
+        color: #111827;
+      }
+
+      .maps-btn {
+        margin-top: 2px;
+      }
+
+      .alt-safe-card {
+        background: #ecfdf3;
+      }
+
+      .footer-note {
+        font-size: 12px;
+        color: #6b7280;
+        margin-top: 10px;
+      }
+
+      @media (min-width: 768px) {
+        .hero-title {
+          font-size: 30px;
+        }
+
+        .card {
+          padding: 24px 26px 26px;
+        }
+
+        .route-leg-card {
+          padding: 20px 22px 20px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="rs-header">
+        <div class="rs-header-inner">
+          <div class="rs-logo-emoji" aria-hidden="true">🛣️</div>
+          <div class="rs-header-text">
+            <h1 class="rs-header-title">RouteSafe AI</h1>
+            <p class="rs-header-subtitle">
+              HGV routes that avoid low bridges.
+            </p>
+          </div>
+        </div>
+      </header>
+
+      <section class="hero-card">
+        <div class="hero-eyebrow">Prototype v0.5</div>
+        <h2 class="hero-title">Keep your drop order – RouteSafe AI</h2>
+        <p class="hero-subtitle">
+          Checks each leg for low bridges using OpenRouteService + a UK bridge
+          dataset.
+        </p>
+        <p class="hero-meta">Internal live prototype · not for driver use.</p>
+      </section>
+
+      <main>
+        <!-- Route details form -->
+        <section class="card" aria-labelledby="route-details-heading">
+          <div class="card-header">
+            <h2 id="route-details-heading" class="card-title">
+              Route details
+            </h2>
+            <p class="card-subtitle">
+              Enter depot, full running height and postcodes in drop order.
+            </p>
+          </div>
+
+          <div class="form-row">
+            <label for="originPostcode">Depot postcode</label>
+            <input
+              id="originPostcode"
+              type="text"
+              inputmode="text"
+              autocomplete="postal-code"
+              value="LS270BN"
+            />
+          </div>
+
+          <div class="form-row">
+            <label for="vehicleHeight">Vehicle / trailer height (m)</label>
+            <input
+              id="vehicleHeight"
+              type="number"
+              min="3"
+              max="6"
+              step="0.1"
+              value="4.0"
+            />
+            <div class="field-help">Enter your full running height.</div>
+          </div>
+
+          <div class="form-row">
+            <label for="deliveryPostcodes">Delivery postcodes in order</label>
+            <textarea
+              id="deliveryPostcodes"
+              spellcheck="false"
+              placeholder="HD5 0RL&#10;WF14 0BS&#10;..."
+            ></textarea>
+            <div class="field-help">One postcode per line.</div>
+          </div>
+
+          <button id="generateRouteBtn" class="primary-btn" type="button">
+            Generate safe legs
+          </button>
+
+          <div id="routeStatus" class="status-text info"></div>
+        </section>
+
+        <!-- Route legs -->
+        <section class="card" aria-labelledby="route-legs-heading">
+          <div class="route-legs-header">
+            <h2 id="route-legs-heading">Route legs</h2>
+            <p>Each leg checked for low bridges.</p>
+          </div>
+
+          <div id="routeLegsContainer">
+            <p>No legs yet – generate a route above.</p>
+          </div>
+
+          <p class="footer-note">
+            Data source: OpenRouteService + internal UK low bridge dataset.
+          </p>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js" defer></script>
+  </body>
 </html>
