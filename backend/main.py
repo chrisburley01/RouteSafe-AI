@@ -34,8 +34,7 @@ for c in WEB_CANDIDATES:
         break
 
 if WEB_DIR is None:
-    # Fallback to BASE_DIR just so app starts; you'll see 404s if /web is missing
-    WEB_DIR = BASE_DIR
+    WEB_DIR = BASE_DIR  # fallback, but you *do* have /web so this shouldn't happen
 
 # ---------------------------------------------------------------------------
 # External services config
@@ -54,8 +53,9 @@ ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
 
 
 class RouteRequest(BaseModel):
+    # 🔴 IMPORTANT: match the existing frontend JSON keys
     vehicle_height_m: float = Field(..., alias="vehicleHeight")
-    origin_postcode: str = Field(..., alias="originPostcode")
+    depot_postcode: str = Field(..., alias="depotPostcode")
     delivery_postcodes: List[str] = Field(..., alias="deliveryPostcodes")
 
 
@@ -86,7 +86,7 @@ app = FastAPI(title="RouteSafe HGV Low-Bridge Checker")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # safe enough for now
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -193,7 +193,8 @@ def generate_route(request: RouteRequest):
             status_code=400, detail="At least one delivery postcode is required"
         )
 
-    stops = [request.origin_postcode] + request.delivery_postcodes
+    # 🔴 Use depot_postcode as the first stop – matches the existing frontend concept
+    stops = [request.depot_postcode] + request.delivery_postcodes
     legs: List[RouteLeg] = []
 
     for i in range(len(stops) - 1):
@@ -251,7 +252,7 @@ def generate_route(request: RouteRequest):
 # Static frontend mount
 # ---------------------------------------------------------------------------
 
-# Serve everything in /web (whichever candidate exists) from "/"
+# Serve everything in /web from "/"
 app.mount(
     "/",
     StaticFiles(directory=str(WEB_DIR), html=True),
