@@ -60,7 +60,7 @@ bridge_engine = BridgeEngine(csv_path=str(BASE_DIR / "bridge_heights_clean.csv")
 def pick(data: Dict[str, Any], keys: List[str]) -> Optional[Any]:
     """Return the first non-empty key value from a list of possible keys."""
     for k in keys:
-        if k in data and data[k] not in ("", None, []):
+        if k in data and data[k] not in ("", None, [], {}):
             return data[k]
     return None
 
