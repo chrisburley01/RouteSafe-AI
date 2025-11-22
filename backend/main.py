@@ -1,27 +1,29 @@
 # ===========================
 # RouteSafe-AI Backend v5.0R
-# (no polyline, robust errors, serves UI)
+# (no polyline, robust errors + static UI)
 # ===========================
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import os
 import re
 import requests
+from pathlib import Path
 
 from bridge_engine import BridgeEngine  # uses bridge_heights_clean.csv
+
+# ---------------------------
+# Paths
+# ---------------------------
+BASE_DIR = Path(__file__).resolve().parent.parent  # repo root
+WEB_DIR = BASE_DIR / "web"
 
 # ORS API key from Render env
 ORS_API_KEY = os.getenv("ORS_API_KEY")
 if not ORS_API_KEY:
     ORS_API_KEY = None
-
-# --- paths for the frontend files (../web) ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-WEB_DIR = os.path.join(BASE_DIR, "..", "web")
-INDEX_FILE = os.path.join(WEB_DIR, "index.html")
 
 app = FastAPI(
     title="RouteSafe-AI",
@@ -29,17 +31,16 @@ app = FastAPI(
     description="HGV low-bridge routing engine – avoid low bridges",
 )
 
-# Serve static frontend assets (styles.css, app.js) under /static
-if os.path.isdir(WEB_DIR):
-    app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+# Serve /static/* from the web folder (styles.css, app.js, etc.)
+app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
 
 # ------------------------------------------------------------
-# Create a single BridgeEngine instance at startup
+# Bridge engine startup
 # ------------------------------------------------------------
 try:
     bridge_engine = BridgeEngine(
-        csv_path="bridge_heights_clean.csv",
+        csv_path=str(BASE_DIR / "backend" / "bridge_heights_clean.csv"),
         search_radius_m=300.0,
         conflict_clearance_m=0.0,
         near_clearance_m=0.25,
@@ -108,8 +109,7 @@ def geocode_address(query: str):
 
 def get_ors_route(start_lon: float, start_lat: float, end_lon: float, end_lat: float):
     """
-    Minimal ORS HGV route call:
-    just coordinates, no geometry_format, etc.
+    Minimal ORS HGV route call: just coordinates, no geometry_format, etc.
     """
     if not ORS_API_KEY:
         raise HTTPException(
@@ -222,10 +222,11 @@ def create_route(req: RouteRequest):
                 vehicle_height_m=req.vehicle_height_m,
             )
 
-            if result.nearest_bridge is not None:
-                nearest_h = result.nearest_bridge.height_m
-            else:
-                nearest_h = None
+            nearest_h = (
+                result.nearest_bridge.height_m
+                if result.nearest_bridge is not None
+                else None
+            )
 
             bridge_risk = BridgeRiskSummary(
                 has_conflict=result.has_conflict,
@@ -255,32 +256,18 @@ def create_route(req: RouteRequest):
 
 
 # ------------------------------------------------------------
-# UI + health endpoints
+# UI + status endpoints
 # ------------------------------------------------------------
 
-@app.get("/", include_in_schema=False)
-def serve_index():
-    """
-    Serve the nice frontend UI at the root.
-    """
-    if os.path.exists(INDEX_FILE):
-        return FileResponse(INDEX_FILE)
-    # Fallback if the file isn't there for some reason
-    return {
-        "service": "RouteSafe-AI",
-        "version": "5.0R-no-polyline",
-        "status": "ok",
-        "bridge_engine_ok": BRIDGE_ENGINE_OK,
-        "bridge_engine_error": BRIDGE_ENGINE_ERROR,
-        "message": "Frontend index.html not found; API is running. Use POST /api/route.",
-    }
+@app.get("/")
+async def serve_index():
+    """Serve the nice frontend UI at the root URL."""
+    return FileResponse(WEB_DIR / "index.html", media_type="text/html")
 
 
-@app.get("/health")
-def health():
-    """
-    JSON health endpoint (what you currently see at /).
-    """
+@app.get("/api/status")
+def status():
+    """JSON health/status endpoint."""
     return {
         "service": "RouteSafe-AI",
         "version": "5.0R-no-polyline",
