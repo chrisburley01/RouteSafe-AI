@@ -1,10 +1,17 @@
+# backend/main.py
+#
+# RouteSafe backend:
+# - Serves the SPA frontend from the /web folder
+# - Exposes /api/route for low-bridge-checked HGV route legs
+# - Accepts a flexible JSON body from the frontend without strict validation.
+
 import os
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from urllib.parse import urlencode, quote_plus
 
 import requests
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -50,10 +57,10 @@ bridge_engine = BridgeEngine(csv_path=str(BASE_DIR / "bridge_heights_clean.csv")
 # ---------------------------------------------------------------------------
 
 
-def pick(data: dict, keys: List[str]):
+def pick(data: Dict[str, Any], keys: List[str]) -> Optional[Any]:
     """Return the first non-empty key value from a list of possible keys."""
     for k in keys:
-        if k in data and data[k] not in ("", None):
+        if k in data and data[k] not in ("", None, []):
             return data[k]
     return None
 
@@ -138,7 +145,7 @@ def build_safety_label(check: BridgeCheckResult) -> str:
 def build_google_maps_url(
     start_postcode: str,
     end_postcode: str,
-    bridge: Bridge | None,
+    bridge: Optional[Bridge],
 ) -> str:
     origin = quote_plus(start_postcode)
     destination = quote_plus(end_postcode)
@@ -153,23 +160,23 @@ def build_google_maps_url(
 
 
 # ---------------------------------------------------------------------------
-# API route – flexible, no 422s
+# API route – simple dict body (no 422s)
 # ---------------------------------------------------------------------------
 
 
 @app.post("/api/route")
-async def generate_route(request: Request):
+async def generate_route(body: Dict[str, Any]):
     """
     Accepts a flexible JSON body so old/new frontends work:
 
     - vehicleHeight OR vehicle_height_m OR height
-    - depotPostcode OR depot_postcode OR originPostcode OR startPostcode
+    - originPostcode OR origin_postcode OR depotPostcode OR startPostcode
     - deliveryPostcodes OR delivery_postcodes OR postcodes OR drops
     """
-    try:
-        data: Dict[str, Any] = await request.json()
-    except Exception:
-        data = {}
+    data = body or {}
+
+    # Debug log (shows in Render logs)
+    print("DEBUG incoming payload:", data)
 
     # vehicle height
     vh = pick(
@@ -177,26 +184,26 @@ async def generate_route(request: Request):
         ["vehicleHeight", "vehicle_height_m", "vehicle_height", "height", "hgv_height"],
     )
     if vh is None:
-        return {"error": "vehicle height is required"}
+        return {"error": "vehicle height is required", "legs": []}
     try:
         vehicle_height = float(vh)
     except ValueError:
-        return {"error": "vehicle height must be a number"}
+        return {"error": "vehicle height must be a number", "legs": []}
 
-    # depot / origin
+    # origin / depot
     origin = pick(
         data,
         [
-            "depotPostcode",
-            "depot_postcode",
             "originPostcode",
             "origin_postcode",
+            "depotPostcode",
+            "depot_postcode",
             "startPostcode",
             "start_postcode",
         ],
     )
     if not origin:
-        return {"error": "depot/origin postcode is required"}
+        return {"error": "depot/origin postcode is required", "legs": []}
     origin = str(origin).strip()
 
     # deliveries
@@ -206,7 +213,7 @@ async def generate_route(request: Request):
     )
     delivery_postcodes = coerce_delivery_list(raw_deliveries)
     if not delivery_postcodes:
-        return {"error": "at least one delivery postcode is required"}
+        return {"error": "at least one delivery postcode is required", "legs": []}
 
     stops = [origin] + delivery_postcodes
     legs: List[Dict[str, Any]] = []
@@ -246,7 +253,7 @@ async def generate_route(request: Request):
             )
             continue
 
-        # Bridge check (your existing engine)
+        # Bridge check (your engine)
         check = bridge_engine.check_leg(
             start_lat=start_lat,
             start_lon=start_lon,
@@ -289,10 +296,8 @@ async def generate_route(request: Request):
 # ---------------------------------------------------------------------------
 
 if WEB_DIR.is_dir():
-    # Serve index.html, app.js, styles.css from /web at the repo root
     app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
 else:
-    # Fallback so health-check still works if /web not found
     @app.get("/")
     def root():
         return {
