@@ -1,14 +1,17 @@
 # main.py
 #
-# FastAPI backend for RouteSafe – generates HGV legs and checks low bridges.
+# FastAPI backend for RouteSafe – generates HGV legs and checks low bridges,
+# and serves the single-page frontend from index.html at the root.
 
 import os
-from typing import List, Optional
+from typing import List
 from urllib.parse import urlencode, quote_plus
 
 import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+
 from pydantic import BaseModel, Field
 
 from bridge_engine import BridgeEngine, BridgeCheckResult, Bridge
@@ -44,7 +47,6 @@ class RouteLeg(BaseModel):
     bridge_message: str
     safety_label: str
     google_maps_url: str
-    # expose bridge pins as simple dicts in case we want them later frontend-side
     bridge_points: List[dict]
 
 
@@ -52,13 +54,38 @@ class RouteResponse(BaseModel):
     legs: List[RouteLeg]
 
 
+# --- FastAPI app ------------------------------------------------------------
+
+
+app = FastAPI(title="RouteSafe HGV Low-Bridge Checker")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # tighten later if you want
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+bridge_engine = BridgeEngine()
+
+
+# --- Serve frontend ---------------------------------------------------------
+
+
+@app.get("/")
+def serve_index():
+    """
+    Serve the SPA frontend.
+    Assumes index.html sits in the same directory as main.py.
+    """
+    return FileResponse("index.html")
+
+
 # --- Helpers ----------------------------------------------------------------
 
 
 def geocode_postcode(postcode: str) -> (float, float):
-    """
-    Use ORS geocoder to turn a postcode into lat/lon.
-    """
     params = {
         "api_key": ORS_API_KEY,
         "text": postcode,
@@ -87,9 +114,6 @@ def geocode_postcode(postcode: str) -> (float, float):
 def fetch_leg_summary(
     start_lat: float, start_lon: float, end_lat: float, end_lon: float
 ) -> (float, float):
-    """
-    Call ORS directions for a single HGV leg and return (distance_km, duration_min).
-    """
     headers = {"Authorization": ORS_API_KEY, "Content-Type": "application/json"}
     payload = {"coordinates": [[start_lon, start_lat], [end_lon, end_lat]]}
 
@@ -115,15 +139,11 @@ def build_bridge_message(check: BridgeCheckResult) -> str:
         return "⚠️ Bridges close to your vehicle height – double-check before travelling."
     if check.nearest_bridge is None:
         return "No low bridges on this leg."
-    # Nearest bridge exists but outside search radius, just be informative
     return "No low bridges within the risk radius for this leg."
 
 
 def build_safety_label(check: BridgeCheckResult) -> str:
-    """
-    Text that appears in the badge on the card.
-    *Never* use HGV SAFE if there is a conflict.
-    """
+    # Never show HGV SAFE if there's any conflict at all
     if check.has_conflict:
         return "LOW BRIDGE RISK"
     if check.near_height_limit:
@@ -136,43 +156,19 @@ def build_google_maps_url(
     end_postcode: str,
     bridges: List[Bridge],
 ) -> str:
-    """
-    Build a Google Maps directions URL with bridge pins as waypoints.
-    Google doesn't support custom icons in the URL, but each waypoint
-    becomes a visible standard pin (we label them with height).
-    """
     origin = quote_plus(start_postcode)
     destination = quote_plus(end_postcode)
 
-    params = {
-        "api": "1",
-        "origin": origin,
-        "destination": destination,
-    }
+    params = {"api": "1", "origin": origin, "destination": destination}
 
     if bridges:
-        # Use lat,lon pairs as waypoints
         waypoints = "|".join(f"{b.lat},{b.lon}" for b in bridges)
-        # Keep '|' and ',' unescaped so Maps understands them
         params["waypoints"] = waypoints
 
     return "https://www.google.com/maps/dir/?" + urlencode(params, safe="|,")
 
 
-# --- FastAPI app ------------------------------------------------------------
-
-
-app = FastAPI(title="RouteSafe HGV Low-Bridge Checker")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # tighten later if needed
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-bridge_engine = BridgeEngine()
+# --- API route --------------------------------------------------------------
 
 
 @app.post("/api/route", response_model=RouteResponse)
@@ -182,25 +178,24 @@ def generate_route(request: RouteRequest):
     check them against low bridges and return leg summaries.
     """
     if not request.delivery_postcodes:
-        raise HTTPException(status_code=400, detail="At least one delivery postcode is required")
+        raise HTTPException(
+            status_code=400, detail="At least one delivery postcode is required"
+        )
 
-    # Build full list of stops: origin + each delivery in order
     stops = [request.origin_postcode] + request.delivery_postcodes
-
     legs: List[RouteLeg] = []
 
     for i in range(len(stops) - 1):
         start_pc = stops[i]
         end_pc = stops[i + 1]
 
-        # Geocode both ends
         start_lat, start_lon = geocode_postcode(start_pc)
         end_lat, end_lon = geocode_postcode(end_pc)
 
-        # ORS distance/time
-        distance_km, duration_min = fetch_leg_summary(start_lat, start_lon, end_lat, end_lon)
+        distance_km, duration_min = fetch_leg_summary(
+            start_lat, start_lon, end_lat, end_lon
+        )
 
-        # Bridge check (straight-line approximation)
         check = bridge_engine.check_leg(
             start_lat=start_lat,
             start_lon=start_lon,
@@ -209,7 +204,6 @@ def generate_route(request: RouteRequest):
             vehicle_height_m=request.vehicle_height_m,
         )
 
-        # Which bridges to show as pins? Conflicts first, otherwise "near" bridges.
         bridge_list = check.conflict_bridges if check.conflict_bridges else check.near_bridges
 
         gm_url = build_google_maps_url(
@@ -231,7 +225,8 @@ def generate_route(request: RouteRequest):
             safety_label=build_safety_label(check),
             google_maps_url=gm_url,
             bridge_points=[
-                {"lat": b.lat, "lon": b.lon, "height_m": b.height_m} for b in bridge_list
+                {"lat": b.lat, "lon": b.lon, "height_m": b.height_m}
+                for b in bridge_list
             ],
         )
         legs.append(leg)
