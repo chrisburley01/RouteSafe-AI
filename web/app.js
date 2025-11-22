@@ -5,8 +5,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Backend base URL (your Render backend)
   const API_BASE = "https://routesafe-ai.onrender.com";
 
-  // Default origin (your depot). If you ever add an input#originPostcode,
-  // this will be overridden by the user's value.
+  // Default origin (your depot).
   const DEFAULT_ORIGIN = "LS270BN";
 
   const vehicleHeightInput =
@@ -60,6 +59,8 @@ document.addEventListener("DOMContentLoaded", () => {
         deliveryPostcodes: deliveryLines,
       };
 
+      console.log("Sending payload", payload);
+
       const res = await fetch(API_BASE + "/api/route", {
         method: "POST",
         headers: {
@@ -76,13 +77,12 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = await res.json();
       console.log("API response", data);
 
-      // NEW: if backend sends an error, show it and stop.
       if (data && data.error) {
         if (statusEl) {
           statusEl.textContent = "Backend error: " + data.error;
           statusEl.style.color = "#c0392b";
         }
-        renderLegs([]); // clear any legs
+        renderLegs([]);
         return;
       }
 
@@ -133,7 +133,6 @@ document.addEventListener("DOMContentLoaded", () => {
       const badge = document.createElement("span");
       badge.className = "route-leg-badge";
 
-      // Use backend safety_label so we NEVER show HGV SAFE if there's a low bridge
       const label =
         leg.safety_label ||
         (leg.has_conflict
