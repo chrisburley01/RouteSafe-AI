@@ -1,23 +1,28 @@
-# ===========================
+# ===============================
 # bridge_engine.py
-# ===========================
+# ===============================
+# Simple low-bridge risk engine for RouteSafe-AI.
 #
-# Loads low-bridge data from CSV and checks a route geometry
-# (list of [lon, lat] points from ORS) for nearby low bridges.
-#
-# CSV expectations:
-#   bridge_heights_clean.csv with columns:
-#       lat, lon, height_m
-#
+# Given a full route (list of [lon, lat] points) and vehicle height,
+# it:
+#   - finds nearby bridges
+#   - flags conflicts (bridge < vehicle height)
+#   - flags near-miss (bridge < vehicle height + 0.25m)
+#   - returns summary + warning list
 
 from dataclasses import dataclass
 from typing import Optional, List, Tuple
+from pathlib import Path
 import math
-import csv
-
-EARTH_RADIUS_M = 6_371_000.0  # metres
+import pandas as pd
 
 
+EARTH_RADIUS_M = 6371000.0  # metres
+
+
+# ------------------------------------------------------------------
+# Data classes
+# ------------------------------------------------------------------
 @dataclass
 class Bridge:
     lat: float
@@ -26,24 +31,50 @@ class Bridge:
 
 
 @dataclass
+class BridgeWarning:
+    bridge: Bridge
+    distance_m: float
+    severity: str  # "conflict" or "near"
+    message: str
+
+
+@dataclass
 class BridgeCheckResult:
     has_conflict: bool
     near_height_limit: bool
     nearest_bridge: Optional[Bridge]
     nearest_distance_m: Optional[float]
+    warnings: List[BridgeWarning]
 
 
+# ------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------
+def haversine_m(lat1, lon1, lat2, lon2) -> float:
+    """Great-circle distance between two WGS84 points in metres."""
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+
+    a = (
+        math.sin(dphi / 2.0) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2.0) ** 2
+    )
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return EARTH_RADIUS_M * c
+
+
+# ------------------------------------------------------------------
+# Bridge engine
+# ------------------------------------------------------------------
 class BridgeEngine:
     """
-    Loads low-bridge data and checks a *route* (polyline) for
-    nearby bridges given a vehicle height (metres).
+    Loads low-bridge data and can check a full route for risks.
 
-    Usage:
-
-        engine = BridgeEngine("bridge_heights_clean.csv")
-        result = engine.check_route(coords, vehicle_height_m=4.9)
-
-        coords is a list of [lon, lat] from ORS GeoJSON geometry.
+    Expects CSV with columns:
+        lat, lon, height_m
+    (this matches your bridge_heights_clean.csv)
     """
 
     def __init__(
@@ -53,143 +84,141 @@ class BridgeEngine:
         conflict_clearance_m: float = 0.0,
         near_clearance_m: float = 0.25,
     ):
-        self.csv_path = csv_path
-        self.search_radius_m = float(search_radius_m)
-        self.conflict_clearance_m = float(conflict_clearance_m)
-        self.near_clearance_m = float(near_clearance_m)
+        self.search_radius_m = search_radius_m
+        self.conflict_clearance_m = conflict_clearance_m
+        self.near_clearance_m = near_clearance_m
+
+        csv_full = Path(csv_path)
+        if not csv_full.is_file():
+            # Allow relative from this file's directory as well
+            csv_full = Path(__file__).resolve().parent / csv_path
+
+        if not csv_full.is_file():
+            raise FileNotFoundError(f"Bridge CSV not found at {csv_full}")
+
+        df = pd.read_csv(csv_full)
+
+        # Normalise column names
+        cols = {c.lower(): c for c in df.columns}
+        lat_col = cols.get("lat") or cols.get("latitude")
+        lon_col = cols.get("lon") or cols.get("longitude")
+        h_col = cols.get("height_m") or cols.get("height")
+
+        if not (lat_col and lon_col and h_col):
+            raise ValueError(
+                "bridge_heights_clean.csv must have lat, lon, height_m columns"
+            )
 
         self.bridges: List[Bridge] = []
-        self._load_csv()
+        for _, row in df.iterrows():
+            try:
+                lat = float(row[lat_col])
+                lon = float(row[lon_col])
+                h = float(row[h_col])
+            except (TypeError, ValueError):
+                continue
+            self.bridges.append(Bridge(lat=lat, lon=lon, height_m=h))
 
-    # ----------------------- CSV loader -----------------------
-
-    def _load_csv(self) -> None:
-        """
-        Load bridges from CSV into memory.
-
-        Expects columns: lat, lon, height_m
-        """
-        try:
-            with open(self.csv_path, newline="", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    try:
-                        lat = float(row["lat"])
-                        lon = float(row["lon"])
-                        height = float(row["height_m"])
-                        self.bridges.append(Bridge(lat=lat, lon=lon, height_m=height))
-                    except Exception:
-                        # Skip any bad row quietly
-                        continue
-        except FileNotFoundError:
-            # If the file isn't there we just work with no bridges
-            self.bridges = []
-
-    # ----------------------- Geo helpers -----------------------
-
-    @staticmethod
-    def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-        """
-        Great-circle distance in metres between two points.
-        """
-        phi1 = math.radians(lat1)
-        phi2 = math.radians(lat2)
-        dphi = phi2 - phi1
-        dlambda = math.radians(lon2 - lon1)
-
-        a = (
-            math.sin(dphi / 2.0) ** 2
-            + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2.0) ** 2
-        )
-        c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
-        return EARTH_RADIUS_M * c
-
-    # ----------------------- Main check -----------------------
-
+    # --------------------------------------------------------------
     def check_route(
-        self,
-        route_coords_lonlat: List[List[float]],
-        vehicle_height_m: float,
+        self, route_lonlat: List[Tuple[float, float]], vehicle_height_m: float
     ) -> BridgeCheckResult:
         """
-        route_coords_lonlat: list of [lon, lat] points along the route.
-        vehicle_height_m: full running height of the vehicle.
+        route_lonlat: list of (lon, lat) points from ORS.
         """
 
-        if not self.bridges or not route_coords_lonlat:
+        if not route_lonlat or not self.bridges:
             return BridgeCheckResult(
                 has_conflict=False,
                 near_height_limit=False,
                 nearest_bridge=None,
                 nearest_distance_m=None,
+                warnings=[],
             )
 
-        vehicle_height_m = float(vehicle_height_m)
-
-        # Convert route coords to (lat, lon) tuples for easier handling
-        # ORS gives [lon, lat], so we flip them.
-        route_latlon: List[Tuple[float, float]] = [
-            (float(lat), float(lon)) for lon, lat in route_coords_lonlat
-        ]
-
-        # Bounding box filter to make it efficient
-        lats = [lat for lat, _ in route_latlon]
-        lons = [lon for _, lon in route_latlon]
-
-        min_lat, max_lat = min(lats), max(lats)
+        # Quick bounding box to skip far-away bridges
+        lons = [p[0] for p in route_lonlat]
+        lats = [p[1] for p in route_lonlat]
         min_lon, max_lon = min(lons), max(lons)
+        min_lat, max_lat = min(lats), max(lats)
 
-        # Expand by a margin derived from search radius
-        deg_margin = self.search_radius_m / 111_000.0  # approx degrees per metre
+        # Expand box a little
+        pad_deg = 0.01  # ~1km in lat
+        min_lon -= pad_deg
+        max_lon += pad_deg
+        min_lat -= pad_deg
+        max_lat += pad_deg
 
-        lat_min_bb = min_lat - deg_margin
-        lat_max_bb = max_lat + deg_margin
-        lon_min_bb = min_lon - deg_margin
-        lon_max_bb = max_lon + deg_margin
+        relevant_bridges = [
+            b
+            for b in self.bridges
+            if (min_lon <= b.lon <= max_lon) and (min_lat <= b.lat <= max_lat)
+        ]
 
         has_conflict = False
         near_limit = False
         nearest_bridge: Optional[Bridge] = None
         nearest_distance_m: Optional[float] = None
+        warnings: List[BridgeWarning] = []
 
-        for bridge in self.bridges:
-            # Quick bbox rejection
-            if not (lat_min_bb <= bridge.lat <= lat_max_bb):
-                continue
-            if not (lon_min_bb <= bridge.lon <= lon_max_bb):
-                continue
+        for bridge in relevant_bridges:
+            # Find closest distance from bridge to any route point
+            min_dist = None
+            for lon, lat in route_lonlat:
+                d = haversine_m(lat, lon, bridge.lat, bridge.lon)
+                if min_dist is None or d < min_dist:
+                    min_dist = d
 
-            # Compute min distance from this bridge to any route point
-            min_d_for_bridge = None
-            for lat_r, lon_r in route_latlon:
-                d = self._haversine_m(lat_r, lon_r, bridge.lat, bridge.lon)
-                if (min_d_for_bridge is None) or (d < min_d_for_bridge):
-                    min_d_for_bridge = d
-
-            if min_d_for_bridge is None:
-                continue
-
-            # Only treat as "near" if within search radius
-            if min_d_for_bridge > self.search_radius_m:
-                continue
-
-            # Update nearest bridge candidate
-            if (nearest_distance_m is None) or (min_d_for_bridge < nearest_distance_m):
-                nearest_distance_m = min_d_for_bridge
-                nearest_bridge = bridge
+            if min_dist is None or min_dist > self.search_radius_m:
+                continue  # too far from the route to care
 
             # Height logic
-            # 1) Hard conflict: bridge + clearance < vehicle
-            if bridge.height_m + self.conflict_clearance_m < vehicle_height_m:
+            clearance = bridge.height_m - vehicle_height_m
+
+            if clearance < self.conflict_clearance_m:
                 has_conflict = True
+                severity = "conflict"
+                msg = (
+                    f"Bridge {bridge.height_m:.2f} m within "
+                    f"{min_dist:.0f} m of route (< vehicle height)."
+                )
+            elif clearance < self.near_clearance_m:
+                near_limit = True
+                severity = "near"
+                msg = (
+                    f"Bridge {bridge.height_m:.2f} m within "
+                    f"{min_dist:.0f} m of route (near height limit)."
+                )
             else:
-                # 2) Near limit: within near_clearance_m of vehicle height
-                if abs(bridge.height_m - vehicle_height_m) <= self.near_clearance_m:
-                    near_limit = True
+                # safe, but still track nearest for info
+                severity = ""
+                msg = ""
+
+            if severity:
+                warnings.append(
+                    BridgeWarning(
+                        bridge=bridge,
+                        distance_m=min_dist,
+                        severity=severity,
+                        message=msg,
+                    )
+                )
+
+            # Track nearest bridge to route, regardless of severity
+            if nearest_distance_m is None or min_dist < nearest_distance_m:
+                nearest_distance_m = min_dist
+                nearest_bridge = bridge
+
+        # Sort warnings by severity then distance
+        severity_order = {"conflict": 0, "near": 1}
+        warnings.sort(
+            key=lambda w: (severity_order.get(w.severity, 99), w.distance_m)
+        )
 
         return BridgeCheckResult(
             has_conflict=has_conflict,
             near_height_limit=near_limit,
             nearest_bridge=nearest_bridge,
             nearest_distance_m=nearest_distance_m,
+            warnings=warnings,
         )
