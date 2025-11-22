@@ -3,7 +3,7 @@
 # RouteSafe backend:
 # - Serves the SPA frontend from the /web folder
 # - Exposes /api/route for low-bridge-checked HGV route legs
-# - Request body is parsed manually to be robust to field-name changes.
+# - NO Pydantic validation on input to avoid 422 errors.
 
 import os
 from pathlib import Path
@@ -11,10 +11,9 @@ from typing import List, Dict, Any
 from urllib.parse import urlencode, quote_plus
 
 import requests
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 
 from bridge_engine import BridgeEngine, BridgeCheckResult, Bridge
 
@@ -49,41 +48,18 @@ ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-hgv
 ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
 
 # ---------------------------------------------------------------------------
-# Response models (output only – we don't validate the input)
-# ---------------------------------------------------------------------------
-
-
-class RouteLeg(BaseModel):
-    index: int
-    start_postcode: str
-    end_postcode: str
-    distance_km: float
-    duration_min: float
-    vehicle_height_m: float
-    has_conflict: bool
-    near_height_limit: bool
-    bridge_message: str
-    safety_label: str
-    google_maps_url: str
-    bridge_points: List[Dict[str, Any]]
-
-
-class RouteResponse(BaseModel):
-    legs: List[RouteLeg]
-
-
-# ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="RouteSafe HGV Low-Bridge Checker")
 
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    CORSMiddleware(
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 )
 
 bridge_engine = BridgeEngine()
@@ -180,28 +156,33 @@ def coerce_delivery_list(raw: Any) -> List[str]:
         return []
     if isinstance(raw, list):
         return [str(x).strip() for x in raw if str(x).strip()]
-    # e.g. "LS1 1AA\nLS2 2BB"
     if isinstance(raw, str):
         return [s.strip() for s in raw.splitlines() if s.strip()]
     return []
 
 
 # ---------------------------------------------------------------------------
-# API route – manual input parsing, very forgiving
+# API route – NO Pydantic on input, so 422 can't happen
 # ---------------------------------------------------------------------------
 
 
-@app.post("/api/route", response_model=RouteResponse)
-def generate_route(payload: Dict[str, Any] = Body(...)):
+@app.post("/api/route")
+async def generate_route(request: Request):
     """
-    Accepts a very flexible JSON body – works with both old and new frontends.
+    Very forgiving endpoint – it will accept any JSON shape and try to
+    interpret it as a RouteSafe request.
 
     Expected keys (any of these variations are accepted):
       - vehicleHeight OR vehicle_height_m
       - depotPostcode OR originPostcode OR startPostcode
-      - deliveryPostcodes OR postcodes
+      - deliveryPostcodes OR postcodes OR stops
     """
-    # Vehicle height
+    try:
+        payload: Dict[str, Any] = await request.json()
+    except Exception:
+        payload = {}
+
+    # vehicle height
     vh = (
         payload.get("vehicleHeight")
         or payload.get("vehicle_height_m")
@@ -214,7 +195,7 @@ def generate_route(payload: Dict[str, Any] = Body(...)):
     except ValueError:
         raise HTTPException(status_code=400, detail="vehicle height must be a number")
 
-    # Depot / origin postcode
+    # depot / origin
     depot = (
         payload.get("depotPostcode")
         or payload.get("originPostcode")
@@ -224,7 +205,7 @@ def generate_route(payload: Dict[str, Any] = Body(...)):
         raise HTTPException(status_code=400, detail="depot/origin postcode is required")
     depot_postcode = str(depot).strip()
 
-    # Delivery postcodes list
+    # deliveries
     raw_deliveries = (
         payload.get("deliveryPostcodes")
         or payload.get("postcodes")
@@ -237,7 +218,7 @@ def generate_route(payload: Dict[str, Any] = Body(...)):
         )
 
     stops = [depot_postcode] + delivery_postcodes
-    legs: List[RouteLeg] = []
+    legs: List[Dict[str, Any]] = []
 
     for i in range(len(stops) - 1):
         start_pc = stops[i]
@@ -268,26 +249,27 @@ def generate_route(payload: Dict[str, Any] = Body(...)):
             bridges=bridge_list,
         )
 
-        leg = RouteLeg(
-            index=i + 1,
-            start_postcode=start_pc,
-            end_postcode=end_pc,
-            distance_km=round(distance_km, 1),
-            duration_min=round(duration_min, 1),
-            vehicle_height_m=vehicle_height,
-            has_conflict=check.has_conflict,
-            near_height_limit=check.near_height_limit,
-            bridge_message=build_bridge_message(check),
-            safety_label=build_safety_label(check),
-            google_maps_url=gm_url,
-            bridge_points=[
+        leg = {
+            "index": i + 1,
+            "start_postcode": start_pc,
+            "end_postcode": end_pc,
+            "distance_km": round(distance_km, 1),
+            "duration_min": round(duration_min, 1),
+            "vehicle_height_m": vehicle_height,
+            "has_conflict": check.has_conflict,
+            "near_height_limit": check.near_height_limit,
+            "bridge_message": build_bridge_message(check),
+            "safety_label": build_safety_label(check),
+            "google_maps_url": gm_url,
+            "bridge_points": [
                 {"lat": b.lat, "lon": b.lon, "height_m": b.height_m}
                 for b in bridge_list
             ],
-        )
+        }
         legs.append(leg)
 
-    return RouteResponse(legs=legs)
+    # Plain dict – no response validation
+    return {"legs": legs}
 
 
 # ---------------------------------------------------------------------------
