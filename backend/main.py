@@ -53,13 +53,13 @@ ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
 
 app = FastAPI(title="RouteSafe HGV Low-Bridge Checker")
 
+# ✅ Correct pattern: pass the CLASS + kwargs, not an instance
 app.add_middleware(
-    CORSMiddleware(
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 bridge_engine = BridgeEngine()
