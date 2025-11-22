@@ -1,7 +1,7 @@
-# main.py
+# backend/main.py
 #
-# FastAPI backend for RouteSafe – generates HGV legs and checks low bridges,
-# and serves the single-page frontend from index.html at the root.
+# FastAPI backend for RouteSafe – generates HGV legs, checks low bridges
+# using our CSV, and returns a Google Maps URL with bridge pins per leg.
 
 import os
 from typing import List
@@ -10,26 +10,24 @@ from urllib.parse import urlencode, quote_plus
 import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-
 from pydantic import BaseModel, Field
 
 from bridge_engine import BridgeEngine, BridgeCheckResult, Bridge
 
+# --- Config -----------------------------------------------------------------
 
 ORS_API_KEY = os.getenv("ORS_API_KEY")
-
 if not ORS_API_KEY:
     raise RuntimeError("Please set ORS_API_KEY in your environment.")
 
 ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-hgv"
 ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
 
-
 # --- Models -----------------------------------------------------------------
 
 
 class RouteRequest(BaseModel):
+    # keys as they appear in JSON body from frontend
     vehicle_height_m: float = Field(..., alias="vehicleHeight")
     origin_postcode: str = Field(..., alias="originPostcode")
     delivery_postcodes: List[str] = Field(..., alias="deliveryPostcodes")
@@ -54,14 +52,14 @@ class RouteResponse(BaseModel):
     legs: List[RouteLeg]
 
 
-# --- FastAPI app ------------------------------------------------------------
+# --- App setup --------------------------------------------------------------
 
 
 app = FastAPI(title="RouteSafe HGV Low-Bridge Checker")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten later if you want
+    allow_origins=["*"],  # frontend is separate (web/), so allow all
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -70,16 +68,10 @@ app.add_middleware(
 bridge_engine = BridgeEngine()
 
 
-# --- Serve frontend ---------------------------------------------------------
-
-
 @app.get("/")
-def serve_index():
-    """
-    Serve the SPA frontend.
-    Assumes index.html sits in the same directory as main.py.
-    """
-    return FileResponse("index.html")
+def root():
+    """Simple root so hitting the backend URL doesn't show a 404."""
+    return {"detail": "RouteSafe API is running. POST to /api/route."}
 
 
 # --- Helpers ----------------------------------------------------------------
@@ -143,7 +135,7 @@ def build_bridge_message(check: BridgeCheckResult) -> str:
 
 
 def build_safety_label(check: BridgeCheckResult) -> str:
-    # Never show HGV SAFE if there's any conflict at all
+    # Never show HGV SAFE if there is any conflict
     if check.has_conflict:
         return "LOW BRIDGE RISK"
     if check.near_height_limit:
@@ -156,6 +148,10 @@ def build_google_maps_url(
     end_postcode: str,
     bridges: List[Bridge],
 ) -> str:
+    """
+    Build a Google Maps directions URL with bridge pins as waypoints.
+    Pins come straight from our CSV via BridgeEngine.
+    """
     origin = quote_plus(start_postcode)
     destination = quote_plus(end_postcode)
 
@@ -163,7 +159,7 @@ def build_google_maps_url(
 
     if bridges:
         waypoints = "|".join(f"{b.lat},{b.lon}" for b in bridges)
-        params["waypoints"] = waypoints
+        params["waypoints"] = waypoints  # standard pins
 
     return "https://www.google.com/maps/dir/?" + urlencode(params, safe="|,")
 
