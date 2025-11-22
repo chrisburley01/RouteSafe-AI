@@ -4,10 +4,15 @@
   <meta charset="UTF-8" />
   <title>RouteSafe AI – HGV low-bridge risk mapping</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="styles.css" />
+
+  <!-- Correct static path -->
+  <link rel="stylesheet" href="/static/styles.css" />
 </head>
+
 <body>
   <div class="page">
+
+    <!-- Header -->
     <header class="header">
       <div class="logo-row">
         <div class="logo-placeholder">RS</div>
@@ -19,15 +24,19 @@
       </div>
     </header>
 
+    <!-- Main -->
     <main class="main">
+
+      <!-- Input card -->
       <section class="card">
         <h2 class="card-title">Plan safe delivery legs</h2>
         <p class="card-intro">
-          Enter your depot postcode, delivery postcodes in order, and your full running
+          Enter your depot postcode, delivery postcodes in order, and your running
           height. Each leg will be checked against the RouteSafe low-bridge engine.
         </p>
 
         <form id="routeForm" class="form">
+
           <label class="field">
             <span class="field-label">Depot / start postcode</span>
             <input
@@ -56,12 +65,13 @@
               <input
                 id="vehicleHeight"
                 type="number"
-                step="0.1"
                 min="2"
+                step="0.1"
                 class="input"
                 placeholder="e.g. 4.9"
               />
             </div>
+
             <div class="inline-right toggle-wrapper">
               <span class="field-label">Avoid low bridges</span>
               <label class="toggle">
@@ -71,7 +81,7 @@
             </div>
           </label>
 
-          <button type="submit" class="primary-btn" id="generateBtn">
+          <button class="primary-btn" type="submit" id="generateBtn">
             Generate safe legs
           </button>
 
@@ -79,6 +89,7 @@
         </form>
       </section>
 
+      <!-- Results card -->
       <section class="card" id="resultsCard" style="display:none;">
         <h2 class="card-title">Route legs</h2>
         <p class="card-subtitle">
@@ -87,15 +98,19 @@
 
         <div id="legsContainer" class="legs-container"></div>
       </section>
+
     </main>
 
+    <!-- Footer -->
     <footer class="footer">
       <p class="footer-text">
         Data source: OpenRouteService · internal UK low-bridge dataset (RouteSafe).
       </p>
     </footer>
+
   </div>
 
-  <script src="app.js"></script>
+  <!-- Correct static JS path -->
+  <script src="/static/app.js"></script>
 </body>
 </html>
