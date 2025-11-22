@@ -9,11 +9,19 @@
 <body>
   <main class="page">
     <header class="hero">
+      <div class="hero-top">
+        <!-- Replace src path if your logo file is different -->
+        <img
+          src="assets/routesafe-logo.svg"
+          alt="RouteSafe AI logo"
+          class="hero-logo"
+        />
+      </div>
+
       <h1>Keep your drop order – RouteSafe AI</h1>
       <p class="hero-subtitle">
         Prototype v0.5 • Checks each leg for low bridges using ORS + UK bridge dataset.
       </p>
-      <p class="hero-badge">Internal Use Only</p>
     </header>
 
     <section class="card">
@@ -84,7 +92,7 @@
     </footer>
   </main>
 
-  <!-- Cache-busted JS so you definitely load v0.5 logic -->
-  <script src="app.js?v=20251122-2"></script>
+  <!-- Cache-busted JS so you definitely load latest logic -->
+  <script src="app.js?v=20251122-3"></script>
 </body>
 </html>
