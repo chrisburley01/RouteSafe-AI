@@ -1,40 +1,41 @@
+# ===========================
+# RouteSafe-AI Backend (FULL)
+# ===========================
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import requests
-import math
 import os
+import re
 
-# ------------------------------
-# CONFIG
-# ------------------------------
+# ORS API key
+ORS_API_KEY = os.getenv("ORS_API_KEY")
 
-ORS_API_KEY = "5b3ce3597851110001cf62480d8bd4326e784b2995c1a56e31f99909"  # Your real ORS key
-ORS_URL = "https://api.openrouteservice.org/v2/directions/driving-hgv"
-
-BRIDGE_CSV = "bridge_heights_clean.csv"
-
-# Load bridge data
-import pandas as pd
-bridges_df = pd.read_csv(BRIDGE_CSV)
-
-
-# ------------------------------
-# FASTAPI SETUP
-# ------------------------------
-app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+app = FastAPI(
+    title="RouteSafe-AI",
+    version="1.0",
+    description="HGV low-bridge routing engine – avoid low bridges"
 )
 
 
-# ------------------------------
-# REQUEST MODEL
-# ------------------------------
+# ------------------------------------------------------------
+# UK POSTCODE NORMALISER (fix for LS270BN, M314QN, HD50RJ etc.)
+# ------------------------------------------------------------
+def normalise_uk_postcode(value: str) -> str:
+    if not value:
+        return value
+
+    raw = re.sub(r"[^A-Za-z0-9]", "", value).upper()
+
+    # Only normalise values that look like UK postcodes
+    if not (5 <= len(raw) <= 7):
+        return value.strip()
+
+    return f"{raw[:-3]} {raw[-3:]}"
+
+
+# ------------------------------------------------------------
+# Request model
+# ------------------------------------------------------------
 class RouteRequest(BaseModel):
     start: str
     end: str
@@ -42,91 +43,73 @@ class RouteRequest(BaseModel):
     avoid_low_bridges: bool = True
 
 
-# ------------------------------
-# GEOCODER
-# ------------------------------
-def geocode(postcode: str):
-    url = f"https://api.openrouteservice.org/geocode/search?api_key={ORS_API_KEY}&text={postcode}"
-    r = requests.get(url)
+# ------------------------------------------------------------
+# Geocoding using ORS
+# ------------------------------------------------------------
+def geocode_address(query: str):
+    url = "https://api.openrouteservice.org/geocode/search"
+    params = {"api_key": ORS_API_KEY, "text": query}
+
+    r = requests.get(url, params=params)
+    if r.status_code != 200:
+        raise HTTPException(status_code=400, detail=f"ORS geocode failed: {query}")
+
     data = r.json()
+    if not data.get("features"):
+        raise HTTPException(status_code=400, detail=f"Unable to geocode: {query}")
 
-    if "features" not in data or len(data["features"]) == 0:
-        raise HTTPException(status_code=400, detail=f"Unable to geocode: {postcode}")
-
-    lon, lat = data["features"][0]["geometry"]["coordinates"]
-    return lat, lon
-
-
-# ------------------------------
-# BRIDGE CHECK
-# ------------------------------
-def nearest_bridge(lat, lon):
-    bridges_df["distance"] = (
-        (bridges_df["lat"] - lat)**2 + (bridges_df["lon"] - lon)**2
-    )
-
-    row = bridges_df.loc[bridges_df["distance"].idxmin()]
-    return {
-        "height_m": row["height_m"],
-        "lat": row["lat"],
-        "lon": row["lon"]
-    }
+    coords = data["features"][0]["geometry"]["coordinates"]
+    return coords[0], coords[1]   # lon, lat
 
 
-# ------------------------------
-# MAIN ROUTING ENDPOINT
-# ------------------------------
+# ------------------------------------------------------------
+# Route engine (ORS directions + your bridge engine later)
+# ------------------------------------------------------------
 @app.post("/api/route")
-def route(req: RouteRequest):
+def create_route(req: RouteRequest):
 
-    # 1) Geocode input
-    start_lat, start_lon = geocode(req.start)
-    end_lat, end_lon = geocode(req.end)
+    # 1) CLEAN THE POSTCODES FIRST
+    start_query = normalise_uk_postcode(req.start)
+    end_query = normalise_uk_postcode(req.end)
 
-    # 2) Call ORS for HGV route
+    # 2) GEOCODE
+    start_lon, start_lat = geocode_address(start_query)
+    end_lon, end_lat = geocode_address(end_query)
+
+    # 3) ORS routing (HGV profile)
+    url = "https://api.openrouteservice.org/v2/directions/driving-hgv"
+    body = {
+        "coordinates": [
+            [start_lon, start_lat],
+            [end_lon, end_lat]
+        ]
+    }
     headers = {"Authorization": ORS_API_KEY, "Content-Type": "application/json"}
 
-    body = {
-        "coordinates": [[start_lon, start_lat], [end_lon, end_lat]],
-        "profile_params": {
-            "restrictions": {
-                "height": req.vehicle_height_m
-            }
-        }
-    }
+    r = requests.post(url, json=body, headers=headers)
 
-    ors = requests.post(ORS_URL, json=body, headers=headers)
+    if r.status_code != 200:
+        raise HTTPException(status_code=400, detail=f"ORS routing failed: {r.text}")
 
-    if ors.status_code != 200:
-        raise HTTPException(status_code=500, detail=f"ORS error: {ors.text}")
+    route = r.json()
 
-    ors_json = ors.json()
-
-    # 3) Extract summary
-    summary = ors_json["routes"][0]["summary"]
-    geom = ors_json["routes"][0]["geometry"]
-
-    # 4) Check nearest bridge (simple version)
-    nb = nearest_bridge(start_lat, start_lon)
-
-    risk = "ok"
-    if nb["height_m"] < req.vehicle_height_m:
-        risk = "warning"
+    # You can plug the bridge-engine in here
 
     return {
-        "status": "ok",
-        "geometry": geom,
-        "summary": summary,
-        "bridge_risk": risk,
-        "nearest_bridge": nb,
-        "engine": "RouteSafeAI v1.0"
+        "ok": True,
+        "start_used": start_query,
+        "end_used": end_query,
+        "route": route
     }
 
 
+# ------------------------------------------------------------
+# Base endpoint
+# ------------------------------------------------------------
 @app.get("/")
 def root():
     return {
         "service": "RouteSafe-AI",
         "status": "ok",
-        "message": "HGV low-bridge routing engine - use POST /api/route"
+        "message": "HGV low-bridge routing engine – use POST /api/route"
     }
