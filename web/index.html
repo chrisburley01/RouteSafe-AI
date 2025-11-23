@@ -2,89 +2,126 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <title>RouteSafe AI – Build a safe HGV route</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>RouteSafe AI</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
-
 <body>
+  <div class="page">
+    <!-- HEADER -->
+    <header class="header">
+      <div class="logo-row">
+        <div class="logo-placeholder">RS</div>
 
-  <!-- HEADER -->
-  <header class="header-gradient">
-    <div class="header-inner">
-
-      <div class="header-left">
-        <div class="logo-circle">RS</div>
-
-        <div>
+        <div class="title-block">
           <h1 class="app-title">RouteSafe AI</h1>
           <p class="app-subtitle">Build a safe HGV route</p>
-          <p class="app-version-line">Prototype v5.0 · Internal use only</p>
+          <p class="app-meta">Prototype v5.0 · Internal use only</p>
         </div>
+
+        <span class="version-pill">v5.0</span>
       </div>
 
-      <div class="badge-container">
-        <span class="version-badge">v5.0</span>
+      <div class="header-copy">
+        <h2 class="header-heading">Build a safe HGV route</h2>
+        <p class="header-text">
+          Keep your existing drop order — RouteSafe AI will check each leg for low
+          bridges using ORS directions and a UK bridge database.
+        </p>
       </div>
+    </header>
 
-    </div>
+    <!-- MAIN -->
+    <main class="main">
+      <!-- INPUT CARD -->
+      <section class="card">
+        <h2 class="card-title">Route details</h2>
+        <p class="card-intro">
+          Enter your depot, trailer height and delivery postcodes in order.
+        </p>
 
-    <h2 class="header-tagline">Build a safe HGV route</h2>
-    <p class="header-desc">
-      Keep your existing drop order — RouteSafe AI will check each leg 
-      for low bridges using ORS directions and a UK bridge database.
-    </p>
-  </header>
+        <form id="routeForm" class="form">
+          <!-- Depot -->
+          <label class="field">
+            <span class="field-label">Depot postcode</span>
+            <input
+              id="depotPostcode"
+              type="text"
+              class="input"
+              placeholder="LS27 0BN"
+              autocomplete="off"
+            />
+          </label>
 
+          <!-- Deliveries -->
+          <label class="field">
+            <span class="field-label">Delivery postcodes in order</span>
+            <textarea
+              id="deliveryPostcodes"
+              class="textarea"
+              rows="4"
+              placeholder="One postcode per line&#10;e.g.&#10;HD5 0RL&#10;WF1 1AA"
+            ></textarea>
+            <span class="field-hint">
+              One postcode per line. Keep the drop order you want to run.
+            </span>
+          </label>
 
+          <!-- Height + toggle -->
+          <label class="field inline">
+            <div class="inline-left">
+              <span class="field-label">Vehicle / trailer height (m)</span>
+              <input
+                id="vehicleHeight"
+                type="number"
+                step="0.1"
+                min="2"
+                class="input"
+                placeholder="e.g. 4.9"
+              />
+              <span class="field-hint">
+                Use full running height including trailer.
+              </span>
+            </div>
 
-  <!-- FORM CARD -->
-  <section class="card">
-    <h2>Route details</h2>
-    <p class="section-desc">
-      Enter your depot, trailer height and delivery postcodes in order.
-    </p>
+            <div class="inline-right toggle-wrapper">
+              <span class="field-label">Avoid low bridges</span>
+              <label class="toggle">
+                <input id="avoidLowBridges" type="checkbox" checked />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+          </label>
 
-    <label for="depot">Depot postcode</label>
-    <input id="depot" type="text" placeholder="LS27 0BN" />
+          <!-- Generate button -->
+          <button type="submit" class="primary-btn" id="generateBtn">
+            Generate safe legs
+          </button>
 
-    <label for="drops">Delivery postcodes in order</label>
-    <textarea id="drops" placeholder="One postcode per line&#10;e.g.&#10;HD5 0RL&#10;WF1 1AA"></textarea>
-    <p class="hint">One postcode per line. Keep the drop order you want to run.</p>
+          <!-- Status text -->
+          <p id="statusMessage" class="status-message"></p>
+        </form>
+      </section>
 
-    <div class="row">
-      <div class="col">
-        <label for="height">Vehicle / trailer height (m)</label>
-        <input id="height" type="number" step="0.1" placeholder="4.9" />
-        <p class="hint">Use full running height including trailer.</p>
-      </div>
+      <!-- RESULTS CARD -->
+      <section class="card" id="resultsCard" style="display: none;">
+        <h2 class="card-title">Route legs</h2>
+        <p class="card-subtitle">
+          Each leg checked for low bridges using OpenRouteService + RouteSafe bridge data.
+        </p>
 
-      <div class="col toggle-col">
-        <label for="avoid">Avoid low bridges</label>
-        <label class="switch">
-          <input id="avoid" type="checkbox" checked />
-          <span class="slider"></span>
-        </label>
-      </div>
-    </div>
+        <div id="legsContainer" class="legs-container"></div>
+      </section>
+    </main>
 
-    <button id="generate-btn" class="btn-primary">
-      Generate safe legs
-    </button>
-
-    <p id="status" class="status-text"></p>
-  </section>
-
-
-  <!-- RESULTS -->
-  <section id="results"></section>
-
-
-  <footer class="footer">
-    Data source: OpenRouteService · internal UK low-bridge dataset (RouteSafe).
-  </footer>
+    <!-- FOOTER -->
+    <footer class="footer">
+      <p class="footer-text">
+        Data source: OpenRouteService · internal UK low-bridge dataset (RouteSafe).
+      </p>
+    </footer>
+  </div>
 
   <script src="app.js"></script>
-
 </body>
 </html>
