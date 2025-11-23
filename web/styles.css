@@ -1,179 +1,114 @@
-/* ------------------------------
-   Base
------------------------------- */
-:root {
-  --radius-card: 22px;
-  --radius-pill: 999px;
-  --shadow-card: 0 8px 26px rgba(0,0,0,0.15);
-  --transition-fast: 0.15s ease-in-out;
-  --bg1: #e9eff7;
-  --bg2: #f7fafc;
-}
+/* -------------- */
+/* Base Layout    */
+/* -------------- */
 
 body {
   margin: 0;
-  padding: 0;
-  font-family: "Inter", "Arial", sans-serif;
-  background: var(--bg1);
-  color: #0a0f1a;
-  -webkit-font-smoothing: antialiased;
+  font-family: "Inter", sans-serif;
+  background: #f3f5f9;
+  color: #111;
 }
 
-/* Page wrapper */
-.page {
-  max-width: 720px;
-  margin: 0 auto;
+.hero {
+  background: linear-gradient(135deg, #002c77 0%, #0f2353 50%, #133b83 100%);
+  color: #fff;
+  padding: 36px 24px 48px;
+  border-bottom-left-radius: 32px;
+  border-bottom-right-radius: 32px;
 }
 
-/* ------------------------------
-   HEADER
------------------------------- */
-
-.header {
-  background: linear-gradient(135deg, #0045c5, #012a7e 60%, #021a52 100%);
-  padding: 32px 20px 46px;
-  color: white;
-  text-align: left;
-  position: relative;
+.hero h1 {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 700;
 }
 
-.logo-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 18px;
+.hero p {
+  opacity: 0.85;
+  font-size: 16px;
+  margin-top: 4px;
+  margin-bottom: 0;
 }
 
-.logo-placeholder {
-  background: white;
-  width: 52px;
-  height: 52px;
+.version-pill {
+  display: inline-block;
+  margin-top: 12px;
+  background: #0f2353;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* -------------- */
+/* Cards          */
+/* -------------- */
+
+.card {
+  background: #fff;
+  margin: 16px;
+  padding: 24px;
+  border-radius: 28px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.08);
+}
+
+.card h2 {
+  margin: 0 0 6px 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.card-subtitle {
+  margin: 0 0 18px 0;
+  opacity: 0.7;
+}
+
+/* -------------- */
+/* Form Fields    */
+/* -------------- */
+
+.input, .textarea {
+  width: 100%;
+  padding: 14px 18px;
+  border: 1px solid #d0d7e1;
   border-radius: 14px;
+  font-size: 16px;
+  outline: none;
+}
+
+.input:focus, .textarea:focus {
+  border-color: #0066ff;
+}
+
+/* -------------- */
+/* Green buttons  */
+/* -------------- */
+
+.primary-btn {
+  width: 100%;
+  padding: 18px 0;
+  margin-top: 16px;
+  font-size: 20px;
+  font-weight: 600;
+  border: none;
+  border-radius: 32px;
+  color: #fff;
+  background: linear-gradient(135deg, #2ecc71, #27ae60);
+  box-shadow: 0 8px 24px rgba(39, 174, 96, 0.4);
+}
+
+.primary-btn:active {
+  transform: scale(0.98);
+}
+
+/* ---------- */
+/* Toggle     */
+/* ---------- */
+
+.toggle-wrapper {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #003b8f;
-  font-weight: 700;
-  font-size: 1.3rem;
-}
-
-/* Title & subtitle */
-.app-title {
-  margin: 0;
-  font-size: 1.9rem;
-  font-weight: 700;
-}
-
-.app-subtitle {
-  margin: 2px 0 0 0;
-  font-size: 1rem;
-  opacity: 0.85;
-}
-
-/* Version pill */
-.version-pill {
-  position: absolute;
-  top: 28px;
-  right: 22px;
-  background: #001e5a;
-  padding: 6px 14px;
-  border-radius: var(--radius-pill);
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: #ffffff;
-}
-
-/* ------------------------------
-   MAIN CONTENT AREA
------------------------------- */
-
-.main {
-  padding: 14px 16px 50px;
-  background: var(--bg2);
-}
-
-/* CARD WRAPPER */
-.card {
-  background: #ffffff;
-  border-radius: var(--radius-card);
-  padding: 26px 20px 30px;
-  margin-bottom: 32px;
-  box-shadow: var(--shadow-card);
-}
-
-.card-title {
-  margin: 0 0 12px 0;
-  font-size: 1.4rem;
-  font-weight: 700;
-}
-
-.card-subtitle,
-.card-intro {
-  margin: 0 0 16px 0;
-  font-size: 0.95rem;
-  color: #364150;
-}
-
-/* ------------------------------
-   FORM
------------------------------- */
-
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.field-label {
-  display: block;
-  margin-bottom: 6px;
-  font-weight: 600;
-  font-size: 1rem;
-  color: #1c2d45;
-}
-
-.input,
-.textarea {
-  width: 100%;
-  padding: 14px;
-  border-radius: 18px;
-  border: 1px solid #bfc8d7;
-  font-size: 1rem;
-  font-family: inherit;
-  outline: none;
-  transition: border var(--transition-fast),
-              box-shadow var(--transition-fast);
-  background: #ffffff;
-}
-
-.input:focus,
-.textarea:focus {
-  border-color: #0045c5;
-  box-shadow: 0 0 0 3px rgba(0, 69, 197, 0.25);
-}
-
-/* Height + Toggle line */
-.inline {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.inline-left {
-  width: 62%;
-}
-
-.inline-right {
-  width: 35%;
-  text-align: right;
-}
-
-/* Toggle */
-.toggle {
-  position: relative;
-  display: inline-block;
-  width: 54px;
-  height: 30px;
 }
 
 .toggle input {
@@ -181,158 +116,118 @@ body {
 }
 
 .toggle-slider {
-  position: absolute;
-  cursor: pointer;
-  inset: 0;
-  background: #cccccc;
-  border-radius: 30px;
-  transition: background var(--transition-fast);
+  width: 56px;
+  height: 30px;
+  background: #ccc;
+  border-radius: 40px;
+  position: relative;
+  transition: 0.25s ease;
 }
 
-.toggle-slider:before {
+.toggle-slider::before {
   content: "";
-  position: absolute;
-  height: 22px;
-  width: 22px;
-  left: 4px;
-  top: 4px;
-  background: white;
+  width: 26px;
+  height: 26px;
+  background: #fff;
   border-radius: 50%;
-  transition: transform var(--transition-fast);
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: 0.25s ease;
 }
 
 .toggle input:checked + .toggle-slider {
-  background: #22c55e;
+  background: #2ecc71;
+  box-shadow: 0 4px 18px rgba(46, 204, 113, 0.4);
 }
 
-.toggle input:checked + .toggle-slider:before {
-  transform: translateX(24px);
+.toggle input:checked + .toggle-slider::before {
+  transform: translateX(26px);
 }
 
-/* ------------------------------
-   PRIMARY BUTTON (Generate)
------------------------------- */
-
-.primary-btn {
-  width: 100%;
-  padding: 16px 18px;
-  border-radius: var(--radius-pill);
-  border: none;
-  font-size: 1.2rem;
-  font-weight: 700;
-  cursor: pointer;
-  font-family: inherit;
-  background: radial-gradient(circle at 15% 0%, #bbf7d0, #16a34a);
-  color: #022c22;
-  box-shadow: 0 18px 36px rgba(22, 163, 74, 0.55);
-  transition: transform var(--transition-fast),
-              box-shadow var(--transition-fast),
-              filter var(--transition-fast);
-}
-
-.primary-btn:hover {
-  transform: translateY(-1px);
-  filter: brightness(1.05);
-  box-shadow: 0 22px 46px rgba(22, 163, 74, 0.75);
-}
-
-.primary-btn:active {
-  transform: translateY(1px);
-  box-shadow: 0 12px 20px rgba(21, 128, 61, 0.6);
-}
-
-/* Status text */
-.status-message {
-  text-align: left;
-  font-size: 1rem;
-  color: #198754;
-  margin-top: -10px;
-}
-
-/* ------------------------------
-   RESULTS SECTION
------------------------------- */
-
-.legs-container {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
+/* ------------------------- */
+/* LEG CARDS (Route results) */
+/* ------------------------- */
 
 .leg-card {
-  background: #ffffff;
-  border-radius: var(--radius-card);
-  padding: 22px 20px;
-  box-shadow: var(--shadow-card);
+  background: #fff;
+  border-radius: 24px;
+  padding: 22px;
+  margin-bottom: 18px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.08);
 }
 
 .leg-title {
-  margin: 0 0 6px 0;
-  font-size: 1.25rem;
+  font-size: 20px;
   font-weight: 700;
-}
-
-.leg-subtitle {
-  margin: 0 0 10px 0;
-  font-weight: 500;
-  font-size: 0.92rem;
-  color: #404c5a;
+  margin: 0 0 4px 0;
 }
 
 .risk-badge {
-  display: inline-block;
-  background: #fee2e2;
+  float: right;
+  padding: 6px 14px;
+  background: #f8d7da;
   color: #b91c1c;
-  font-size: 0.85rem;
-  padding: 6px 12px;
-  border-radius: var(--radius-pill);
+  border-radius: 20px;
+  font-size: 14px;
   font-weight: 600;
 }
 
-/* ------------------------------
-   GOOGLE MAPS BUTTON
-   (Matches the Generate Button)
------------------------------- */
+/* 🔴 If low bridge → FULL RED CARD */
+.leg-card:has(.risk-badge) {
+  background: #fdeaea;
+  border-color: #f5b3b3;
+}
 
-.leg-map-btn,
-.map-button,
-.leg-card button {
-  margin-top: 14px;
+.leg-card:has(.risk-badge) * {
+  color: #7f1d1d;
+}
+
+/* ------------------------------------- */
+/* Google Maps Buttons (green rounded)   */
+/* ------------------------------------- */
+
+.map-btn {
+  display: block;
   width: 100%;
-  border: none;
-  border-radius: var(--radius-pill);
-  padding: 15px 18px;
-  font-size: 1.05rem;
-  font-weight: 700;
-  cursor: pointer;
-  background: radial-gradient(circle at 15% 0%, #bbf7d0, #16a34a);
-  color: #022c22;
-  box-shadow: 0 18px 36px rgba(22, 163, 74, 0.55);
-  transition: transform var(--transition-fast),
-              box-shadow var(--transition-fast),
-              filter var(--transition-fast);
-}
-
-.leg-map-btn:hover,
-.map-button:hover {
-  transform: translateY(-1px);
-  filter: brightness(1.05);
-  box-shadow: 0 22px 46px rgba(22, 163, 74, 0.75);
-}
-
-.leg-map-btn:active,
-.map-button:active {
-  transform: translateY(1px);
-  box-shadow: 0 12px 20px rgba(21, 128, 61, 0.6);
-}
-
-/* ------------------------------
-   FOOTER
------------------------------- */
-
-.footer {
   text-align: center;
-  padding: 28px 12px 60px;
-  color: #5a6475;
-  font-size: 0.9rem;
+  padding: 18px 0;
+  margin-top: 16px;
+  border-radius: 30px;
+  font-size: 18px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #27ae60, #1e8f4d);
+  color: #fff;
+  box-shadow: 0 6px 20px rgba(39,174,96,0.35);
+  text-decoration: none;
+}
+
+/* ----------------------------------------- */
+/* ALT ROUTE CARD (green, safe alternative)  */
+/* ----------------------------------------- */
+
+.alt-card {
+  background: #e8f7ef;
+  border: 1px solid #c6e7d4;
+  border-radius: 24px;
+  padding: 22px;
+  margin-top: 12px;
+}
+
+.alt-card h3 {
+  margin: 0 0 4px 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #14532d;
+}
+
+.alt-badge {
+  float: right;
+  padding: 6px 12px;
+  background: #2ecc71;
+  color: #fff;
+  font-size: 13px;
+  border-radius: 20px;
+  font-weight: 600;
 }
