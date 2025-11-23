@@ -4,42 +4,58 @@
   <meta charset="UTF-8" />
   <title>RouteSafe AI – HGV low-bridge risk mapping</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Important: served from FastAPI StaticFiles -->
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
-
 <body>
   <div class="page">
 
-    <!-- HEADER -->
-    <header class="header">
-      <div class="logo-row">
-        <div class="logo-placeholder">RS</div>
+    <!-- HERO HEADER -->
+    <header class="header header--hero">
+      <div class="header-inner">
+        <div class="logo-row">
+          <!-- Green logo badge (like your old version) -->
+          <div class="logo-badge">
+            <span class="logo-icon">RS</span>
+          </div>
 
-        <div class="title-block">
-          <h1 class="app-title">RouteSafe AI</h1>
-          <p class="app-subtitle">HGV low-bridge risk mapping</p>
+          <div class="title-block">
+            <h1 class="app-title">RouteSafe AI</h1>
+            <p class="app-subtitle">
+              Build a safe HGV route
+            </p>
+            <p class="app-caption">
+              Prototype v5.0 · Internal use only
+            </p>
+          </div>
+
+          <div class="version-pill">
+            <span>v5.0</span>
+          </div>
         </div>
 
-        <span class="version-pill">v5.0</span>
+        <div class="hero-copy">
+          <h2 class="hero-heading">Build a safe HGV route</h2>
+          <p class="hero-text">
+            Keep your existing drop order — RouteSafe AI will check each leg for
+            low bridges using ORS directions and a UK bridge database.
+          </p>
+        </div>
       </div>
     </header>
 
-    <!-- MAIN -->
+    <!-- MAIN CONTENT -->
     <main class="main">
-
-      <!-- INPUT CARD -->
       <section class="card">
-        <h2 class="card-title">Plan safe delivery legs</h2>
-
+        <h3 class="card-title">Route details</h3>
         <p class="card-intro">
-          Enter your depot postcode, delivery postcodes in order, and your running height.
-          Each leg will be checked against the RouteSafe low-bridge engine.
+          Enter your depot, trailer height and delivery postcodes in order.
         </p>
 
         <form id="routeForm" class="form">
-
+          <!-- Depot -->
           <label class="field">
-            <span class="field-label">Depot / start postcode</span>
+            <span class="field-label">Depot postcode</span>
             <input
               id="depotPostcode"
               type="text"
@@ -49,6 +65,7 @@
             />
           </label>
 
+          <!-- Deliveries -->
           <label class="field">
             <span class="field-label">Delivery postcodes in order</span>
             <textarea
@@ -57,12 +74,15 @@
               rows="4"
               placeholder="One postcode per line&#10;e.g.&#10;HD5 0RL&#10;WF1 1AA"
             ></textarea>
-            <span class="field-hint">One postcode per line, in route order.</span>
+            <span class="field-hint">
+              One postcode per line. Keep the drop order you want to run.
+            </span>
           </label>
 
+          <!-- Height + toggle -->
           <label class="field inline">
             <div class="inline-left">
-              <span class="field-label">Vehicle height (m)</span>
+              <span class="field-label">Vehicle / trailer height (m)</span>
               <input
                 id="vehicleHeight"
                 type="number"
@@ -71,6 +91,9 @@
                 class="input"
                 placeholder="e.g. 4.9"
               />
+              <span class="field-hint">
+                Use full running height including trailer.
+              </span>
             </div>
 
             <div class="inline-right toggle-wrapper">
@@ -82,25 +105,24 @@
             </div>
           </label>
 
+          <!-- Button + status -->
           <button type="submit" class="primary-btn" id="generateBtn">
             Generate safe legs
           </button>
 
           <p id="statusMessage" class="status-message"></p>
-
         </form>
       </section>
 
-      <!-- RESULTS CARD -->
+      <!-- RESULTS -->
       <section class="card" id="resultsCard" style="display:none;">
-        <h2 class="card-title">Route legs</h2>
+        <h3 class="card-title">Route legs</h3>
         <p class="card-subtitle">
           Each leg checked for low bridges using OpenRouteService + RouteSafe bridge data.
         </p>
 
         <div id="legsContainer" class="legs-container"></div>
       </section>
-
     </main>
 
     <!-- FOOTER -->
@@ -109,9 +131,9 @@
         Data source: OpenRouteService · internal UK low-bridge dataset (RouteSafe).
       </p>
     </footer>
-
   </div>
 
+  <!-- JS still served from /static so back end keeps working -->
   <script src="/static/app.js"></script>
 </body>
 </html>
