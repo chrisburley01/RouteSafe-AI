@@ -2,196 +2,89 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>RouteSafe AI – Build a safe HGV route</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RouteSafe AI</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 
 <body>
 
-  <!-- ====================== -->
-  <!-- HERO HEADER -->
-  <!-- ====================== -->
-  <header class="hero">
-    <div>
-      <h1>RouteSafe AI</h1>
-      <p>Build a safe HGV route</p>
-      <p style="margin-top:8px;">Prototype v5.0 · Internal use only</p>
+  <!-- HEADER -->
+  <header class="header-gradient">
+    <div class="header-inner">
+
+      <div class="header-left">
+        <div class="logo-circle">RS</div>
+
+        <div>
+          <h1 class="app-title">RouteSafe AI</h1>
+          <p class="app-subtitle">Build a safe HGV route</p>
+          <p class="app-version-line">Prototype v5.0 · Internal use only</p>
+        </div>
+      </div>
+
+      <div class="badge-container">
+        <span class="version-badge">v5.0</span>
+      </div>
+
     </div>
-    <span class="version-pill">v5.0</span>
+
+    <h2 class="header-tagline">Build a safe HGV route</h2>
+    <p class="header-desc">
+      Keep your existing drop order — RouteSafe AI will check each leg 
+      for low bridges using ORS directions and a UK bridge database.
+    </p>
   </header>
 
-  <!-- ====================== -->
-  <!-- ROUTE FORM -->
-  <!-- ====================== -->
+
+
+  <!-- FORM CARD -->
   <section class="card">
     <h2>Route details</h2>
-    <p class="card-subtitle">
+    <p class="section-desc">
       Enter your depot, trailer height and delivery postcodes in order.
     </p>
 
-    <form id="routeForm">
+    <label for="depot">Depot postcode</label>
+    <input id="depot" type="text" placeholder="LS27 0BN" />
 
-      <label class="field">
-        <span class="field-label">Depot postcode</span>
-        <input id="depotPostcode" class="input" type="text" placeholder="e.g. LS27 0BN" />
-      </label>
+    <label for="drops">Delivery postcodes in order</label>
+    <textarea id="drops" placeholder="One postcode per line&#10;e.g.&#10;HD5 0RL&#10;WF1 1AA"></textarea>
+    <p class="hint">One postcode per line. Keep the drop order you want to run.</p>
 
-      <label class="field">
-        <span class="field-label">Delivery postcodes in order</span>
-        <textarea
-          id="deliveryPostcodes"
-          class="textarea"
-          rows="4"
-          placeholder="One postcode per line&#10;e.g.&#10;HD5 0RL&#10;WF1 1AA"
-        ></textarea>
-        <span class="field-hint">One postcode per line. Keep the drop order you want to run.</span>
-      </label>
+    <div class="row">
+      <div class="col">
+        <label for="height">Vehicle / trailer height (m)</label>
+        <input id="height" type="number" step="0.1" placeholder="4.9" />
+        <p class="hint">Use full running height including trailer.</p>
+      </div>
 
-      <label class="field inline">
-        <div class="inline-left">
-          <span class="field-label">Vehicle / trailer height (m)</span>
-          <input id="vehicleHeight" class="input" type="number" min="2" step="0.1" placeholder="e.g. 4.9" />
-        </div>
+      <div class="col toggle-col">
+        <label for="avoid">Avoid low bridges</label>
+        <label class="switch">
+          <input id="avoid" type="checkbox" checked />
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
 
-        <div class="inline-right toggle-wrapper">
-          <span class="field-label">Avoid low bridges</span>
-          <label class="toggle">
-            <input id="avoidLowBridges" type="checkbox" checked />
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-      </label>
+    <button id="generate-btn" class="btn-primary">
+      Generate safe legs
+    </button>
 
-      <button type="submit" class="primary-btn">Generate safe legs</button>
-
-      <p id="statusMessage" class="status-message"></p>
-    </form>
+    <p id="status" class="status-text"></p>
   </section>
 
-  <!-- ====================== -->
-  <!-- RESULTS AREA -->
-  <!-- ====================== -->
-  <section class="card" id="resultsCard" style="display:none;">
-    <h2>Route legs</h2>
-    <p class="card-subtitle">
-      Each leg checked for low bridges using OpenRouteService + RouteSafe bridge data.
-    </p>
 
-    <div id="legsContainer"></div>
-  </section>
+  <!-- RESULTS -->
+  <section id="results"></section>
 
-  <!-- ====================== -->
-  <!-- JAVASCRIPT -->
-  <!-- ====================== -->
-  <script>
-    const form = document.getElementById("routeForm");
-    const resultsCard = document.getElementById("resultsCard");
-    const statusMessage = document.getElementById("statusMessage");
-    const legsContainer = document.getElementById("legsContainer");
 
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
+  <footer class="footer">
+    Data source: OpenRouteService · internal UK low-bridge dataset (RouteSafe).
+  </footer>
 
-      statusMessage.textContent = "Generating...";
-      legsContainer.innerHTML = "";
-      resultsCard.style.display = "none";
-
-      const depot = document.getElementById("depotPostcode").value.trim();
-      const height = parseFloat(document.getElementById("vehicleHeight").value);
-      const avoid = document.getElementById("avoidLowBridges").checked;
-
-      const postcodes = document
-        .getElementById("deliveryPostcodes")
-        .value.split("\n")
-        .map((p) => p.trim())
-        .filter((p) => p.length > 0);
-
-      if (!depot || postcodes.length === 0 || !height) {
-        statusMessage.textContent = "Please complete all fields.";
-        return;
-      }
-
-      // Build API request
-      const routeRequest = {
-        start: depot,
-        deliveries: postcodes,
-        vehicle_height_m: height,
-        avoid_low_bridges: avoid
-      };
-
-      try {
-        const r = await fetch("/api/route", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(routeRequest)
-        });
-
-        const data = await r.json();
-
-        if (!data.ok) {
-          statusMessage.textContent = "Error generating route.";
-          return;
-        }
-
-        statusMessage.textContent = "Route generated successfully.";
-        resultsCard.style.display = "block";
-
-        renderLegs(data.legs);
-
-      } catch (err) {
-        statusMessage.textContent = "Network or server error.";
-      }
-    });
-
-    function renderLegs(legs) {
-      legsContainer.innerHTML = "";
-
-      legs.forEach((leg, idx) => {
-        const card = document.createElement("div");
-        card.className = "leg-card";
-
-        // Title + risk badge
-        let titleHTML = `<div class="leg-title">Leg ${idx + 1}: ${leg.start} → ${leg.end}</div>`;
-        if (leg.bridge_risk?.has_conflict) {
-          titleHTML += `<span class="risk-badge">Low bridge risk</span>`;
-        }
-
-        card.innerHTML = `
-          ${titleHTML}
-          <div style="clear:both;"></div>
-          <p>Distance: ${leg.distance_km} km · Time: ${leg.duration_min} min</p>
-        `;
-
-        // If low bridge
-        if (leg.bridge_risk?.has_conflict) {
-          card.innerHTML += `
-            <p>⚠️ Low bridge on this leg. Route not HGV safe at current height. Direct route only – preview in Google Maps and use with caution.</p>
-            <a class="map-btn" href="${leg.direct_gmaps_url}" target="_blank">Open in Google Maps (preview route)</a>
-          `;
-
-          // Add ALT route card underneath
-          card.innerHTML += `
-            <div class="alt-card">
-              <h3>Alternative HGV-safe route</h3>
-              <span class="alt-badge">HGV SAFE (ALT)</span>
-              <p>Suggested HGV-safe route that steers around the low bridge area.</p>
-              <a class="map-btn" style="margin-top:14px;" href="${leg.direct_gmaps_url}" target="_blank">
-                Open in Google Maps (safe route)
-              </a>
-            </div>
-          `;
-        } else {
-          // No bridge conflict
-          card.innerHTML += `
-            <a class="map-btn" href="${leg.direct_gmaps_url}" target="_blank">Open in Google Maps</a>
-          `;
-        }
-
-        legsContainer.appendChild(card);
-      });
-    }
-  </script>
+  <script src="app.js"></script>
 
 </body>
 </html>
