@@ -4,39 +4,36 @@
   <meta charset="UTF-8" />
   <title>RouteSafe AI – HGV low-bridge risk mapping</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-
-  <!-- Correct static path -->
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="styles.css" />
 </head>
-
 <body>
   <div class="page">
-
-    <!-- Header -->
+    <!-- Top header / brand bar -->
     <header class="header">
-      <div class="logo-row">
-        <div class="logo-placeholder">RS</div>
-        <div class="title-block">
-          <h1 class="app-title">RouteSafe AI</h1>
-          <p class="app-subtitle">HGV low-bridge risk mapping</p>
+      <div class="header-inner">
+        <div class="logo-row">
+          <div class="logo-pill">
+            <span class="logo-initials">RS</span>
+          </div>
+          <div class="title-block">
+            <h1 class="app-title">RouteSafe AI</h1>
+            <p class="app-subtitle">HGV low-bridge risk mapping</p>
+          </div>
         </div>
-        <span class="version-pill">v5.0</span>
+        <div class="version-pill">v5.0</div>
       </div>
     </header>
 
-    <!-- Main -->
     <main class="main">
-
-      <!-- Input card -->
+      <!-- Planner card -->
       <section class="card">
         <h2 class="card-title">Plan safe delivery legs</h2>
         <p class="card-intro">
-          Enter your depot postcode, delivery postcodes in order, and your running
-          height. Each leg will be checked against the RouteSafe low-bridge engine.
+          Enter your depot postcode, delivery postcodes in order, and your running height.
+          Each leg will be checked against the RouteSafe low-bridge engine.
         </p>
 
         <form id="routeForm" class="form">
-
           <label class="field">
             <span class="field-label">Depot / start postcode</span>
             <input
@@ -59,20 +56,19 @@
             <span class="field-hint">One postcode per line, in route order.</span>
           </label>
 
-          <label class="field inline">
-            <div class="inline-left">
+          <label class="field field-inline">
+            <div class="inline-group">
               <span class="field-label">Vehicle height (m)</span>
               <input
                 id="vehicleHeight"
                 type="number"
-                min="2"
                 step="0.1"
+                min="2"
                 class="input"
                 placeholder="e.g. 4.9"
               />
             </div>
-
-            <div class="inline-right toggle-wrapper">
+            <div class="inline-group inline-toggle">
               <span class="field-label">Avoid low bridges</span>
               <label class="toggle">
                 <input id="avoidLowBridges" type="checkbox" checked />
@@ -81,7 +77,7 @@
             </div>
           </label>
 
-          <button class="primary-btn" type="submit" id="generateBtn">
+          <button type="submit" class="primary-btn" id="generateBtn">
             Generate safe legs
           </button>
 
@@ -90,7 +86,7 @@
       </section>
 
       <!-- Results card -->
-      <section class="card" id="resultsCard" style="display:none;">
+      <section class="card" id="resultsCard" style="display: none;">
         <h2 class="card-title">Route legs</h2>
         <p class="card-subtitle">
           Each leg checked for low bridges using OpenRouteService + RouteSafe bridge data.
@@ -98,19 +94,15 @@
 
         <div id="legsContainer" class="legs-container"></div>
       </section>
-
     </main>
 
-    <!-- Footer -->
     <footer class="footer">
       <p class="footer-text">
         Data source: OpenRouteService · internal UK low-bridge dataset (RouteSafe).
       </p>
     </footer>
-
   </div>
 
-  <!-- Correct static JS path -->
-  <script src="/static/app.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
