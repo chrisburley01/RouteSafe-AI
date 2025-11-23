@@ -1,221 +1,157 @@
-// RouteSafe-AI web v5 – multi-leg planner
+// RouteSafe-AI frontend v5.0 – multi-leg + bridge risk highlighting
 
-const API_BASE = "https://routesafe-ai.onrender.com";
+document.addEventListener("DOMContentLoaded", () => {
+  const form = document.getElementById("routeForm");
+  const depotInput = document.getElementById("depotPostcode");
+  const deliveriesInput = document.getElementById("deliveryPostcodes");
+  const heightInput = document.getElementById("vehicleHeight");
+  const avoidCheckbox = document.getElementById("avoidLowBridges");
+  const statusEl = document.getElementById("statusMessage");
+  const resultsCard = document.getElementById("resultsCard");
+  const legsContainer = document.getElementById("legsContainer");
 
-const form = document.getElementById("routeForm");
-const depotInput = document.getElementById("depotPostcode");
-const deliveriesInput = document.getElementById("deliveryPostcodes");
-const heightInput = document.getElementById("vehicleHeight");
-const avoidInput = document.getElementById("avoidLowBridges");
-const statusEl = document.getElementById("statusMessage");
-const resultsCard = document.getElementById("resultsCard");
-const legsContainer = document.getElementById("legsContainer");
-const generateBtn = document.getElementById("generateBtn");
+  const API_BASE = window.location.origin; // same Render service
 
-// Optional: a sensible default depot if empty
-if (!depotInput.value.trim()) {
-  depotInput.value = "LS27 0BN";
-}
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    statusEl.textContent = "";
+    legsContainer.innerHTML = "";
+    resultsCard.style.display = "none";
 
-form.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  await generateLegs();
-});
+    const depot = depotInput.value.trim();
+    const height = parseFloat(heightInput.value);
+    const avoidLow = !!avoidCheckbox.checked;
 
-async function generateLegs() {
-  const depot = depotInput.value.trim();
-  const heightStr = heightInput.value.trim();
-  const avoid = !!avoidInput.checked;
+    const deliveries = deliveriesInput.value
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
 
-  const deliveries = deliveriesInput.value
-    .split(/\r?\n/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-
-  if (!depot || deliveries.length === 0 || !heightStr) {
-    showStatus(
-      "Please enter depot, at least one delivery postcode, and vehicle height.",
-      "error"
-    );
-    return;
-  }
-
-  const vehicleHeight = parseFloat(heightStr);
-  if (Number.isNaN(vehicleHeight) || vehicleHeight <= 0) {
-    showStatus("Vehicle height must be a positive number.", "error");
-    return;
-  }
-
-  generateBtn.disabled = true;
-  showStatus("Generating routes and checking bridges…", "info");
-  legsContainer.innerHTML = "";
-  resultsCard.style.display = "none";
-
-  try {
-    const allLegs = [];
-
-    let currentStart = depot;
-    for (let i = 0; i < deliveries.length; i++) {
-      const end = deliveries[i];
-
-      const legIndex = i + 1;
-      const legResult = await fetchRouteLeg(
-        legIndex,
-        currentStart,
-        end,
-        vehicleHeight,
-        avoid
-      );
-
-      allLegs.push(legResult);
-      currentStart = end;
+    if (!depot || deliveries.length === 0 || !height || isNaN(height)) {
+      statusEl.textContent =
+        "Please enter a depot, at least one delivery postcode, and a valid height in metres.";
+      return;
     }
 
-    renderLegs(allLegs);
-    resultsCard.style.display = "block";
-    showStatus("Route generated successfully.", "success");
-  } catch (err) {
-    console.error(err);
-    showStatus(
-      `Error generating route: ${
-        err?.message || "Unexpected error from RouteSafe-AI."
-      }`,
-      "error"
-    );
-  } finally {
-    generateBtn.disabled = false;
-  }
-}
-
-async function fetchRouteLeg(legNumber, start, end, vehicleHeight, avoidLow) {
-  const payload = {
-    start,
-    end,
-    vehicle_height_m: vehicleHeight,
-    avoid_low_bridges: avoidLow,
-  };
-
-  const res = await fetch(`${API_BASE}/api/route`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(
-      `RouteSafe-AI error ${res.status}: ${text || res.statusText}`
-    );
-  }
-
-  const data = await res.json();
-  return {
-    legNumber,
-    start_used: data.start_used,
-    end_used: data.end_used,
-    distance_m: data.distance_m ?? 0,
-    duration_s: data.duration_s ?? 0,
-    bridge_risk: data.bridge_risk ?? {
-      has_conflict: false,
-      near_height_limit: false,
-      nearest_bridge_height_m: null,
-      nearest_bridge_distance_m: null,
-      note: null,
-    },
-  };
-}
-
-function renderLegs(legs) {
-  legsContainer.innerHTML = "";
-
-  legs.forEach((leg) => {
-    const distanceKm = (leg.distance_m / 1000).toFixed(1);
-    const minutes = Math.round(leg.duration_s / 60);
-    const risk = leg.bridge_risk || {};
-    const hasConflict = !!risk.has_conflict;
-    const nearLimit = !!risk.near_height_limit;
-
-    const card = document.createElement("div");
-    card.className = "leg-card";
-
-    const header = document.createElement("div");
-    header.className = "leg-header";
-
-    const title = document.createElement("div");
-    title.className = "leg-title";
-    title.textContent = `Leg ${leg.legNumber}: ${leg.start_used} \u2192 ${leg.end_used}`;
-
-    const badge = document.createElement("span");
-    if (hasConflict) {
-      badge.className = "badge-danger";
-      badge.textContent = "Low bridge risk";
-    } else {
-      badge.className = "badge-safe";
-      badge.textContent = nearLimit ? "Near height limit" : "HGV safe";
-    }
-
-    header.appendChild(title);
-    header.appendChild(badge);
-
-    const meta = document.createElement("div");
-    meta.className = "leg-meta";
-    meta.textContent = `Distance: ${distanceKm} km · Time: ${minutes} min`;
-
-    const body = document.createElement("div");
-    body.className = "leg-body";
-
-    if (hasConflict) {
-      const wrapper = document.createElement("div");
-      wrapper.className = "leg-warning";
-
-      const emoji = document.createElement("div");
-      emoji.className = "leg-warning-emoji";
-      emoji.textContent = "⚠️";
-
-      const text = document.createElement("div");
-      text.innerHTML =
-        "Low bridge on this leg. Route not HGV safe at current height. " +
-        "Direct route only – preview in Google Maps and use with caution.";
-
-      wrapper.appendChild(emoji);
-      wrapper.appendChild(text);
-      body.appendChild(wrapper);
-    } else if (nearLimit) {
-      body.textContent =
-        "No bridge conflicts at this height, but one or more structures are close to your running height. Drive with extra care.";
-    } else {
-      body.textContent = "No low-bridge conflicts detected on this leg.";
-    }
-
-    const mapsBtn = document.createElement("button");
-    mapsBtn.className = "maps-btn";
-    mapsBtn.textContent = "Open in Google Maps (preview route)";
-    mapsBtn.addEventListener("click", () => {
-      const url = buildGoogleMapsUrl(leg.start_used, leg.end_used);
-      window.open(url, "_blank");
+    // Build legs: depot -> drop1, drop1 -> drop2, etc.
+    const legs = [];
+    let last = depot;
+    deliveries.forEach((pc) => {
+      legs.push({ start: last, end: pc });
+      last = pc;
     });
 
-    card.appendChild(header);
-    card.appendChild(meta);
-    card.appendChild(body);
-    card.appendChild(mapsBtn);
+    statusEl.textContent = "Checking legs for low bridges…";
+    form.querySelector("#generateBtn").disabled = true;
 
-    legsContainer.appendChild(card);
+    try {
+      const results = [];
+      for (let i = 0; i < legs.length; i++) {
+        const leg = legs[i];
+        const res = await fetch(`${API_BASE}/api/route`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            start: leg.start,
+            end: leg.end,
+            vehicle_height_m: height,
+            avoid_low_bridges: avoidLow,
+          }),
+        });
+
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`Leg ${i + 1} failed: ${text}`);
+        }
+
+        const data = await res.json();
+        results.push({ ...data, legIndex: i + 1 });
+      }
+
+      renderLegs(results);
+      resultsCard.style.display = "block";
+      statusEl.textContent = "Route generated successfully.";
+    } catch (err) {
+      console.error(err);
+      statusEl.textContent =
+        "Sorry – something went wrong talking to the routing engine. Please try again.";
+    } finally {
+      form.querySelector("#generateBtn").disabled = false;
+    }
   });
-}
 
-function buildGoogleMapsUrl(start, end) {
-  const origin = encodeURIComponent(start);
-  const destination = encodeURIComponent(end);
-  return `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}`;
-}
+  function renderLegs(results) {
+    legsContainer.innerHTML = "";
 
-function showStatus(message, type) {
-  statusEl.textContent = message;
-  statusEl.classList.remove("success", "error");
+    results.forEach((res, idx) => {
+      const title = `Leg ${idx + 1}: ${res.start_used} → ${res.end_used}`;
+      const km = (res.distance_m / 1000).toFixed(1);
+      const minutes = Math.round(res.duration_s / 60);
 
-  if (type === "success") statusEl.classList.add("success");
-  else if (type === "error") statusEl.classList.add("error");
-}
+      const hasConflict = !!res.bridge_risk?.has_conflict;
+      const nearLimit = !!res.bridge_risk?.near_height_limit;
+
+      const legCard = document.createElement("article");
+      legCard.className = "leg-card" + (hasConflict ? " leg-card--danger" : "");
+
+      const titleRow = document.createElement("div");
+      titleRow.className = "leg-title-row";
+
+      const h3 = document.createElement("h3");
+      h3.className = "leg-title";
+      h3.textContent = title;
+
+      const chip = document.createElement("span");
+      chip.className = "leg-chip";
+      chip.textContent = hasConflict
+        ? "Low bridge risk"
+        : nearLimit
+        ? "Near height limit"
+        : "Clear (no low bridge found)";
+
+      titleRow.appendChild(h3);
+      titleRow.appendChild(chip);
+
+      const meta = document.createElement("p");
+      meta.className = "leg-meta";
+      meta.textContent = `Distance: ${km} km · Time: ${minutes} min`;
+
+      legCard.appendChild(titleRow);
+      legCard.appendChild(meta);
+
+      if (hasConflict) {
+        const warn = document.createElement("div");
+        warn.className = "leg-warning";
+
+        const icon = document.createElement("span");
+        icon.className = "leg-warning-icon";
+        icon.textContent = "⚠️";
+
+        const text = document.createElement("p");
+        text.style.margin = "0";
+        text.textContent =
+          "Low bridge on this leg. Route not HGV safe at current height. Direct route only – preview in Google Maps and use with caution.";
+
+        warn.appendChild(icon);
+        warn.appendChild(text);
+        legCard.appendChild(warn);
+      }
+
+      // Google Maps preview button
+      const mapsLink = document.createElement("a");
+      mapsLink.className = "leg-maps-btn";
+      mapsLink.target = "_blank";
+      mapsLink.rel = "noopener noreferrer";
+      mapsLink.href =
+        "https://www.google.com/maps/dir/?api=1&origin=" +
+        encodeURIComponent(res.start_used) +
+        "&destination=" +
+        encodeURIComponent(res.end_used);
+      mapsLink.textContent = "Open in Google Maps (preview route)";
+
+      legCard.appendChild(mapsLink);
+
+      legsContainer.appendChild(legCard);
+    });
+  }
+});
