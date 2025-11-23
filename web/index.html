@@ -2,126 +2,106 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>RouteSafe AI – Build a safe HGV route</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="stylesheet" href="styles.css" />
+  <title>RouteSafe AI – Build a safe HGV route</title>
+
+  <!-- IMPORTANT: Correct static file path -->
+  <link rel="stylesheet" href="/static/styles.css" />
 </head>
+
 <body>
   <div class="page">
+
     <!-- HEADER -->
     <header class="header">
-      <div class="logo-row">
-        <div class="logo-placeholder">RS</div>
-
+      <div class="header-left">
+        <div class="logo-box">RS</div>
         <div class="title-block">
           <h1 class="app-title">RouteSafe AI</h1>
           <p class="app-subtitle">Build a safe HGV route</p>
-          <p class="app-meta">Prototype v5.0 · Internal use only</p>
         </div>
-
-        <span class="version-pill">v5.0</span>
       </div>
 
-      <div class="header-copy">
-        <h2 class="header-heading">Build a safe HGV route</h2>
-        <p class="header-text">
-          Keep your existing drop order — RouteSafe AI will check each leg for low
-          bridges using ORS directions and a UK bridge database.
-        </p>
-      </div>
+      <span class="version-pill">v5.0</span>
     </header>
 
-    <!-- MAIN -->
-    <main class="main">
-      <!-- INPUT CARD -->
-      <section class="card">
-        <h2 class="card-title">Route details</h2>
-        <p class="card-intro">
-          Enter your depot, trailer height and delivery postcodes in order.
-        </p>
+    <!-- INTRO -->
+    <section class="intro-section">
+      <h2 class="intro-title">Build a safe HGV route</h2>
+      <p class="intro-text">
+        Keep your existing drop order — RouteSafe AI will check each leg
+        for low bridges using ORS directions and a UK bridge database.
+      </p>
+    </section>
 
-        <form id="routeForm" class="form">
-          <!-- Depot -->
-          <label class="field">
-            <span class="field-label">Depot postcode</span>
-            <input
-              id="depotPostcode"
-              type="text"
-              class="input"
-              placeholder="LS27 0BN"
-              autocomplete="off"
-            />
-          </label>
+    <!-- FORM CARD -->
+    <section class="card">
+      <h3 class="card-title">Route details</h3>
+      <p class="card-subtitle">
+        Enter your depot, trailer height and delivery postcodes in order.
+      </p>
 
-          <!-- Deliveries -->
-          <label class="field">
-            <span class="field-label">Delivery postcodes in order</span>
-            <textarea
-              id="deliveryPostcodes"
-              class="textarea"
-              rows="4"
-              placeholder="One postcode per line&#10;e.g.&#10;HD5 0RL&#10;WF1 1AA"
-            ></textarea>
-            <span class="field-hint">
-              One postcode per line. Keep the drop order you want to run.
-            </span>
-          </label>
+      <form id="routeForm" class="form">
 
-          <!-- Height + toggle -->
-          <label class="field inline">
-            <div class="inline-left">
-              <span class="field-label">Vehicle / trailer height (m)</span>
-              <input
-                id="vehicleHeight"
-                type="number"
-                step="0.1"
-                min="2"
-                class="input"
-                placeholder="e.g. 4.9"
-              />
-              <span class="field-hint">
-                Use full running height including trailer.
-              </span>
-            </div>
+        <label class="field">
+          <span class="field-label">Depot postcode</span>
+          <input type="text" id="depotPostcode" class="input"
+                 placeholder="e.g. LS27 0BN" />
+        </label>
 
-            <div class="inline-right toggle-wrapper">
-              <span class="field-label">Avoid low bridges</span>
-              <label class="toggle">
-                <input id="avoidLowBridges" type="checkbox" checked />
-                <span class="toggle-slider"></span>
-              </label>
-            </div>
-          </label>
+        <label class="field">
+          <span class="field-label">Delivery postcodes in order</span>
+          <textarea id="deliveryPostcodes" class="textarea" rows="4"
+            placeholder="One postcode per line&#10;e.g.&#10;HD5 0RL&#10;WF1 1AA"></textarea>
+          <span class="field-hint">
+            One postcode per line. Keep the drop order you want to run.
+          </span>
+        </label>
 
-          <!-- Generate button -->
-          <button type="submit" class="primary-btn" id="generateBtn">
-            Generate safe legs
-          </button>
+        <label class="field inline-field">
+          <div class="inline-left">
+            <span class="field-label">Vehicle / trailer height (m)</span>
+            <input type="number" id="vehicleHeight" class="input" step="0.1" min="2"
+                   placeholder="e.g. 4.9" />
+            <span class="field-hint">Use full running height including trailer.</span>
+          </div>
 
-          <!-- Status text -->
-          <p id="statusMessage" class="status-message"></p>
-        </form>
-      </section>
+          <div class="inline-right toggle-wrapper">
+            <span class="field-label">Avoid low bridges</span>
+            <label class="toggle">
+              <input type="checkbox" id="avoidLowBridges" checked />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </label>
 
-      <!-- RESULTS CARD -->
-      <section class="card" id="resultsCard" style="display: none;">
-        <h2 class="card-title">Route legs</h2>
-        <p class="card-subtitle">
-          Each leg checked for low bridges using OpenRouteService + RouteSafe bridge data.
-        </p>
+        <button type="submit" id="generateBtn" class="primary-btn">
+          Generate safe legs
+        </button>
 
-        <div id="legsContainer" class="legs-container"></div>
-      </section>
-    </main>
+        <p id="statusMessage" class="status-message"></p>
+      </form>
+    </section>
 
-    <!-- FOOTER -->
+    <!-- RESULTS CARD -->
+    <section class="card" id="resultsCard" style="display:none;">
+      <h3 class="card-title">Route legs</h3>
+      <p class="card-subtitle">
+        Each leg checked for low bridges using OpenRouteService + RouteSafe bridge data.
+      </p>
+
+      <div id="legsContainer" class="legs-container"></div>
+    </section>
+
     <footer class="footer">
       <p class="footer-text">
         Data source: OpenRouteService · internal UK low-bridge dataset (RouteSafe).
       </p>
     </footer>
+
   </div>
 
-  <script src="app.js"></script>
+  <!-- IMPORTANT: Correct static JS path -->
+  <script src="/static/app.js"></script>
 </body>
 </html>
