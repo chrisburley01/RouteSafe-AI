@@ -1,276 +1,134 @@
-/* ============================= */
-/* Global layout + typography    */
-/* ============================= */
-
+/* ===== Base ===== */
 body {
-    margin: 0;
-    padding: 0;
-    font-family: 'Inter', Arial, sans-serif;
-    background: #f5f7fa;
-    color: #0f2353;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+  background: #f2f3f7;
+  margin: 0;
+  padding: 0;
+  color: #0d1b3d;
 }
 
-.container {
-    width: 92%;
-    max-width: 900px;
-    margin: 0 auto;
+h1, h2, h3, label {
+  color: #0d1b3d;
+  font-weight: 700;
 }
 
-/* ============================= */
-/* Header Section                */
-/* ============================= */
-
+/* ===== Header section (matches screenshot) ===== */
 .header {
-    padding: 40px 0 60px 0;
-    background: radial-gradient(circle at 20% 20%, #4ccf94, #002c77 60%, #00163c 90%);
-    color: white;
+  background: linear-gradient(135deg, #0b2a78, #0d3aa0);
+  padding: 32px 24px 48px;
+  color: #ffffff;
+  border-bottom-left-radius: 40px;
+  border-bottom-right-radius: 40px;
 }
 
-.header-inner {
-    display: flex;
-    align-items: center;
-    gap: 18px;
+.header-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .header-logo {
-    width: 62px;
-    height: 62px;
-    border-radius: 16px;
-    background: rgba(255,255,255,0.13);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 22px;
-    font-weight: 600;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #3ecf5e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: white;
+  font-size: 20px;
 }
 
-.header-title {
-    font-size: 34px;
-    font-weight: 700;
-    margin: 0;
-    color: white;
+.header h1 {
+  margin: 12px 0 0;
+  font-size: 34px;
+  font-weight: 800;
 }
 
-.header-sub {
-    margin: 4px 0 0 0;
-    opacity: 0.9;
-    font-size: 16px;
+.header p.sub {
+  margin: 6px 0;
+  opacity: 0.85;
+  font-size: 16px;
 }
 
-.version-badge {
-    margin-top: 10px;
-    display: inline-block;
-    background: #0f2353;
-    color: white;
-    padding: 6px 14px;
-    border-radius: 14px;
-    font-size: 14px;
-    font-weight: 600;
+.header .version {
+  margin-top: 4px;
+  opacity: 0.7;
+  font-size: 14px;
 }
 
-/* ============================= */
-/* Section Title                 */
-/* ============================= */
-
-.section-title {
-    margin: 32px 0 12px 0;
-    font-size: 28px;
-    font-weight: 700;
-}
-
-/* ============================= */
-/* White Cards                   */
-/* ============================= */
-
+/* ===== White content card ===== */
 .card {
-    background: white;
-    padding: 28px;
-    border-radius: 26px;
-    box-shadow:
-        0 4px 10px rgba(0,0,0,0.04),
-        0 8px 25px rgba(0,0,0,0.07);
-    margin-bottom: 24px;
+  background: #ffffff;
+  margin: -30px 16px 20px;
+  padding: 24px;
+  border-radius: 28px;
+  box-shadow: 0px 6px 18px rgba(0, 0, 0, 0.08);
 }
 
-/* ============================= */
-/* Forms                         */
-/* ============================= */
-
-label {
-    font-weight: 600;
-    display: block;
-    margin-bottom: 10px;
+.card h2 {
+  margin-top: 0;
 }
 
+/* ===== Input fields ===== */
 input, textarea {
-    width: 100%;
-    padding: 14px 16px;
-    font-size: 17px;
-    border-radius: 18px;
-    border: 1px solid #d5d8de;
-    background: #fefefe;
-    outline: none;
-    margin-bottom: 22px;
+  width: 100%;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid #d7dce4;
+  background: #fafbff;
+  font-size: 18px;
+  color: #0d1b3d;
 }
 
 textarea {
-    min-height: 130px;
+  height: 140px;
 }
 
-/* ============================= */
-/* Toggle Switch                 */
-/* ============================= */
-
-.switch-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 6px;
-    margin-bottom: 26px;
-    font-weight: 600;
+/* ===== Generate button (matches screenshot) ===== */
+button {
+  width: 100%;
+  margin-top: 24px;
+  padding: 18px;
+  font-size: 20px;
+  font-weight: 700;
+  color: white;
+  background: linear-gradient(135deg, #2b8f5d, #3ecf5e);
+  border: none;
+  border-radius: 40px;
+  box-shadow: 0px 4px 12px rgba(46, 140, 89, 0.25);
 }
 
-.switch {
-    position: relative;
-    width: 60px;
-    height: 32px;
+/* ===== Route Leg cards ===== */
+.leg-card {
+  background: white;
+  padding: 22px;
+  border-radius: 28px;
+  margin: 18px 0;
+  box-shadow: 0px 6px 18px rgba(0, 0, 0, 0.07);
 }
 
-.switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
+/* Red warning background */
+.leg-card.warning {
+  background: #ffe8e8;
+  border-left: 6px solid #ff4a4a;
 }
 
-.slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0; left: 0;
-    right: 0; bottom: 0;
-    background-color: #ccc;
-    border-radius: 32px;
-    transition: .4s;
+/* ===== Google Maps button (blue link style you lost earlier) ===== */
+.map-link {
+  display: inline-block;
+  margin-top: 12px;
+  color: #0b3dff;
+  font-weight: 600;
+  font-size: 18px;
+  text-decoration: underline;
 }
 
-.slider:before {
-    position: absolute;
-    content: "";
-    height: 24px;
-    width: 24px;
-    left: 4px;
-    bottom: 4px;
-    background-color: white;
-    border-radius: 50%;
-    transition: .4s;
-}
-
-input:checked + .slider {
-    background-color: #2ecc71;
-}
-
-input:checked + .slider:before {
-    transform: translateX(28px);
-}
-
-/* ============================= */
-/* Main Action Button            */
-/* ============================= */
-
-.btn-primary {
-    width: 100%;
-    padding: 18px;
-    font-size: 20px;
-    font-weight: 700;
-    border-radius: 40px;
-    border: none;
-    cursor: pointer;
-    color: white;
-    background: linear-gradient(145deg, #4cd964, #2f9e44);
-    box-shadow:
-        0 8px 18px rgba(76, 217, 100, 0.35),
-        0 2px 4px rgba(0,0,0,0.1);
-    transition: 0.25s ease;
-}
-
-.btn-primary:hover {
-    transform: translateY(-2px);
-}
-
-/* ============================= */
-/* SUCCESS MESSAGE               */
-/* ============================= */
-
-.success-msg {
-    font-size: 18px;
-    margin-top: 14px;
-    font-weight: 600;
-    color: #2f9e44;
-}
-
-/* ============================= */
-/* Route Leg Cards               */
-/* ============================= */
-
-.route-leg-card {
-    background: white;
-    padding: 28px;
-    border-radius: 26px;
-    margin-top: 20px;
-    box-shadow:
-        0 4px 10px rgba(0,0,0,0.04),
-        0 8px 25px rgba(0,0,0,0.07);
-}
-
-.route-leg-card h3 {
-    font-size: 22px;
-    margin: 0 0 12px 0;
-}
-
-.warning-card {
-    background: #ffe1e1 !important;
-    border-left: 6px solid #d32f2f;
-}
-
-.warning-text {
-    color: #c62828;
-    font-size: 16px;
-    font-weight: 600;
-    margin-bottom: 12px;
-}
-
-/* ============================= */
-/* Google Maps Button            */
-/* ============================= */
-
-.btn-maps {
-    display: block;
-    width: 100%;
-    margin-top: 18px;
-    padding: 18px;
-    text-align: center;
-    text-decoration: none;
-    font-size: 20px;
-    font-weight: 700;
-    border-radius: 40px;
-    background: linear-gradient(145deg, #3bb2ff, #0160c9);
-    color: white;
-    box-shadow:
-        0 8px 20px rgba(1, 96, 201, 0.25),
-        0 2px 4px rgba(0,0,0,0.1);
-    transition: 0.25s ease;
-}
-
-.btn-maps:hover {
-    transform: translateY(-2px);
-}
-
-/* ============================= */
-/* Footer                        */
-/* ============================= */
-
+/* ===== Footer ===== */
 .footer {
-    text-align: center;
-    font-size: 15px;
-    padding: 30px 0;
-    opacity: 0.7;
+  text-align: center;
+  color: #6d7a8b;
+  padding: 24px;
+  font-size: 15px;
 }
